@@ -8,7 +8,6 @@
 #include "test_lexer.h"
 #include "test_parser.h"
 #include "test_code.h"
-#include "test_compiler.h"
 #include "test_vm.h"
 #include "test_symbol_table.h"
 #include "test_api.h"
@@ -25,7 +24,6 @@ int tests_main() {
     parser_test();
     code_test();
     symbol_table_test();
-//    compiler_test();
     vm_test();
     api_test();
     return 0;
