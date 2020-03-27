@@ -37,6 +37,8 @@ int main() {
 }
 ```
 
+An example that shows how to call Ape functions from C code and vice versa can be found [here](examples/api.c).
+
 ## Language
 
 Ape is a dynamically typed language with mark and sweep garbage collection. It's compiled to bytecode and executed on internal VM. It's fairly fast for simple numeric operations and not very heavy on allocations (custom allocators can be configured).
