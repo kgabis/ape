@@ -1,0 +1,6 @@
+ape.xcodeproj
+ape/
+examples/repl
+examples/repl.dSYM/
+examples/ape
+.vscode/settings.json
