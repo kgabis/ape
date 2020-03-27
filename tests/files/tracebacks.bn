@@ -1,0 +1,48 @@
+fn traceback() {
+    fn c() {
+        return 1/0;
+    }
+
+    fn b() {
+        return c();
+    }
+
+    fn a() {
+        return b();
+    }
+
+    a();
+}
+
+fn traceback_builtin() {
+    fn c() {
+        len(1);
+    }
+
+    fn b() {
+        c();
+    }
+
+    fn a() {
+        b();
+    }
+
+    a();
+}
+
+
+fn traceback_builtin_error() {
+    fn c() {
+        return custom_error();
+    }
+
+    fn b() {
+        return c();
+    }
+
+    fn a() {
+        return b();
+    }
+
+    a();
+}

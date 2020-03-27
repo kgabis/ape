@@ -1,0 +1,135 @@
+const squared = square_array(1, 2, 3)
+assert(squared[0] == 1)
+assert(squared[1] == 4)
+assert(squared[2] == 9)
+
+import "module_a"
+import "module_a" // double import should work
+
+assert(module_a::add(2, 2) == 4)
+
+import "module_b"
+assert(module_a::inc() == 1)
+assert(module_a::inc() == 2)
+assert(module_b::inc() == 3)
+assert(module_b::inc() == 4)
+
+const trailing_comma_array = [
+    1,
+    2,
+    3,
+]
+
+assert(len(trailing_comma_array) == 3)
+
+const trailing_comma_dict = {
+    a: 1,
+    b: 2,
+    c: 3,
+}
+
+assert(len(trailing_comma_dict) == 3)
+
+// tests a case where sp is incremented over already freed objects
+// and gc tries to mark them
+fn test_gc_fail(a, b, c) { const x = []; const y = []; const z = []; }
+test_gc_fail(1, 2, 3)
+test_gc_fail(1, 2, 3)
+
+const test_dict_count = 10
+const test_dict = make_test_dict(test_dict_count)
+for (i in range(test_dict_count)) {
+    assert(test_dict[to_str(i)] == i)
+}
+
+fn fun() {
+    const arr = [1, 2, 3]
+    const dict = {"a": 1, "b": 2}
+    const str = "lorem ipsum"
+    dict["a"] = 1
+// comment 1 dict["a"] // test
+// comment 2
+    const res = fn(a, b, c) {
+        const res_str = to_str(a) + to_str(b) + to_str(c)
+        return res_str; // comment
+    }
+    return res(1, 2, 3)
+}
+
+println(fun())
+
+fn make_person(name) {
+    const person = {}
+    person.name = name
+    person.hello = fn() {
+        println("hello " + person.name)
+    }
+    person.make_hello = fn() {
+        return "hello " + person.name
+    }
+    return person
+}
+
+const person = make_person("Krzysztof")
+person.hello()
+
+external_fn_test()
+assert(test == 42)
+
+assert(keys({"a": 1, "b": 2})[1] == "b")
+assert(to_str(1) == "1")
+
+const popular_names = ["Krzysztof", "Zbigniew", "Grzegorz"]
+for (name in popular_names) {
+    println(name)
+    if (name == "Zbigniew") {
+        break
+    }
+}
+
+test_check_args(1, [1, 2, 3], {"a": 1}, "lorem", true, fn() {}, println)
+const val = 123
+if (true) {}
+if (false) {}
+var i = 0
+var j = 0
+while ((i+=1) < 10) { break; }
+while ((j+=1) < 10) { }
+
+assert("abc"[0] == "a")
+assert("abc"[0] != "b")
+
+const person1 = make_person("Krzysztof")
+const person2 = deep_copy(person1)
+person2.name = "Mati"
+assert(person1.make_hello() == "hello Krzysztof")
+assert(person2.make_hello() == "hello Mati")
+
+fn contains_item(to_find, items) {
+    for (item in items) {
+        if (item == to_find) {
+            return true
+        }
+    }
+    return false
+}
+
+const cities = ["Kraków", "Warsaw", "Gdańsk"]
+if (contains_item("Kraków", cities)) {
+    println("found!")
+}
+
+fn block_test() {
+    var x = 0
+    {
+        x = 1
+    }
+    return x
+}
+
+assert(block_test() == 1)
+
+const big_array = array(1000)
+assert(len(big_array) == 1000)
+
+fn return_no_semicolon() { return }

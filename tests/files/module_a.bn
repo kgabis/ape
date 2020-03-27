@@ -1,0 +1,11 @@
+import "module_c"
+
+assert(true) // testing if builtins are resolvable
+
+fn inc() {
+    return module_c::inc()
+}
+
+fn add(a, b) {
+    return a + b
+}

@@ -1,0 +1,25 @@
+fn is_prime(n) {
+    var i = 2
+    while (i < n) {
+        if (n % i == 0) {
+            return false
+        }
+        i += 1
+    }
+    return true
+}
+
+fn nth_prime(n) {
+    var candidate = 2
+    var count = 0
+    while (count < n) {
+        if (is_prime(candidate)) {
+            count += 1
+        }
+        candidate += 1
+    }
+    return candidate - 1
+}
+
+const prime = nth_prime(3000);
+assert(prime == 27449);

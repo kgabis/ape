@@ -1,0 +1,12 @@
+println("hello world")
+const x = 0
+var x = 1
+x = 2
+for (y in range(0, 10)) { x += 2; }
+assert(x == 22)
+const arr = []
+assert(append(arr, 1) == 1)
+fn make_adder(inc) { var n = 0; return fn() { n = n + inc; return n; };}
+const adder3 = make_adder(3)
+assert(adder3() == 3)
+assert(adder3() == 6)
