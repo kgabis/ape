@@ -1,7 +1,7 @@
 # The Ape Programming Language
 
 ## About
-Ape is an easy to use programming language and library written in C. It's an offspring of [Monkey](https://monkeylang.org) language (from [Writing An Interpreter In Go](https://interpreterbook.com) and [Writing A Compiler In Go](https://compilerbook.com) books by [Thosten Ball](https://thorstenball.com)), but it evolved to be more procedural with variables, loops, and more.
+Ape is an easy to use programming language and library written in C. It's an offspring of [Monkey](https://monkeylang.org) language (from [Writing An Interpreter In Go](https://interpreterbook.com) and [Writing A Compiler In Go](https://compilerbook.com) books by [Thorsten Ball](https://thorstenball.com)), but it evolved to be more procedural with variables, loops, and more.
 
 ## Current state
 It's under development so everything in the language and the api might change.
