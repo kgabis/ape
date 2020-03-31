@@ -49,7 +49,7 @@ Ape is a dynamically typed language with mark and sweep garbage collection. It's
 ### Operators
 ```
 Math:
-+ - * /
++ - * / %
 
 Logical:
 ! < > <= >= == != && ||
