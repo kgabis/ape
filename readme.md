@@ -141,7 +141,7 @@ fn make_person(name) {
 
 ### Errors
 ```
-const err = error("something bad happened)
+const err = error("something bad happened")
 if (is_error(err)) {
     println(err)
 }
