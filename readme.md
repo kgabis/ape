@@ -168,5 +168,10 @@ It can be joined back into a single file with utils/join.py:
 utils/join.py --template utils/ape.c.templ --path ape --output ape.c
 ```
 
+## My other projects
+* [parson](https://github.com/kgabis/parson) - JSON library
+* [kgflags](https://github.com/kgabis/kgflags) - command-line flag parsing library   
+* [agnes](https://github.com/kgabis/agnes) - header-only NES emulation library
+
 ## License
 [The MIT License (MIT)](http://opensource.org/licenses/mit-license.php)
