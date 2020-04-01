@@ -23,6 +23,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+
 #define APE_AMALGAMATED
 
 #include "ape.h"
@@ -7619,9 +7620,11 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
         }
         case OBJECT_EXTERNAL: {
             copy = object_copy(mem, obj);
+            break;
         }
         case OBJECT_ERROR: {
             copy = obj;
+            break;
         }
     }
     return copy;
@@ -9507,7 +9510,7 @@ static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int a
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 1
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
