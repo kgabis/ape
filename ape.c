@@ -103,8 +103,10 @@ typedef struct ape_config {
     bool repl_mode; // allows redefinition of symbols
 } ape_config_t;
 
+#ifndef APE_AMALGAMATED
 extern const src_pos_t src_pos_invalid;
 extern const src_pos_t src_pos_zero;
+#endif
 
 APE_INTERNAL src_pos_t src_pos_make(const compiled_file_t *file, int line, int column);
 APE_INTERNAL char *ape_stringf(const char *format, ...);
@@ -227,7 +229,7 @@ typedef struct ptrdict_ ptrdict_t_;
 
 COLLECTIONS_API ptrdict_t_* ptrdict_make(void);
 COLLECTIONS_API void        ptrdict_destroy(ptrdict_t_ *dict);
-COLLECTIONS_API void        trdict_set_hash_function(ptrdict_t_ *dict, collections_hash_fn hash_fn);
+COLLECTIONS_API void        ptrdict_set_hash_function(ptrdict_t_ *dict, collections_hash_fn hash_fn);
 COLLECTIONS_API void        ptrdict_set_equals_function(ptrdict_t_ *dict, collections_equals_fn equals_fn);
 COLLECTIONS_API bool        ptrdict_set(ptrdict_t_ *dict, void *key, void *value);
 COLLECTIONS_API void *      ptrdict_get(const ptrdict_t_ *dict, const void *key);
@@ -1170,7 +1172,7 @@ typedef struct gcmem {
 APE_INTERNAL gcmem_t *gcmem_make(void);
 APE_INTERNAL void gcmem_destroy(gcmem_t *mem);
 
-object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type);
+APE_INTERNAL object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type);
 
 APE_INTERNAL void gc_unmark_all(gcmem_t *mem);
 APE_INTERNAL void gc_mark_objects(object_t *objects, int count);
@@ -1306,8 +1308,8 @@ APE_INTERNAL bool vm_execute_function(vm_t *vm, object_t function, array(object_
 APE_INTERNAL object_t vm_last_popped(vm_t *vm);
 APE_INTERNAL bool vm_has_errors(vm_t *vm);
 
-void vm_set_global(vm_t *vm, int ix, object_t val);
-object_t vm_get_global(vm_t *vm, int ix);
+APE_INTERNAL void vm_set_global(vm_t *vm, int ix, object_t val);
+APE_INTERNAL object_t vm_get_global(vm_t *vm, int ix);
 
 #endif /* vm_h */
 //FILE_END
@@ -1324,8 +1326,8 @@ object_t vm_get_global(vm_t *vm, int ix);
 #include "common.h"
 #endif
 
-const src_pos_t src_pos_invalid = { NULL, -1, -1 };
-const src_pos_t src_pos_zero = { NULL, 0, 0 };
+APE_INTERNAL const src_pos_t src_pos_invalid = { NULL, -1, -1 };
+APE_INTERNAL const src_pos_t src_pos_zero = { NULL, 0, 0 };
 
 APE_INTERNAL src_pos_t src_pos_make(const compiled_file_t *file, int line, int column) {
     return (src_pos_t) {
@@ -8789,7 +8791,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
 
 bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants) {
     if (vm->running) {
-        error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "VM is already executing code");
+        error_t *err = error_make(ERROR_USER, src_pos_invalid, "VM is already executing code");
         ptrarray_add(vm->errors, err);
         return false;
     }
@@ -9510,7 +9512,7 @@ static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int a
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 1
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_PATCH 2
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\

@@ -45,9 +45,9 @@ extern "C"
 
 #define APE_VERSION_MAJOR 0
 #define APE_VERSION_MINOR 1
-#define APE_VERSION_PATCH 1
+#define APE_VERSION_PATCH 2
 
-#define APE_VERSION_STRING "0.1.1"
+#define APE_VERSION_STRING "0.1.2"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
@@ -164,10 +164,11 @@ ape_object_type_t ape_object_get_type(ape_object_t obj);
 const char*       ape_object_get_type_string(ape_object_t obj);
 const char*       ape_object_get_type_name(ape_object_type_t type);
 
-double  ape_object_get_number(ape_object_t obj);
-bool ape_object_get_bool(ape_object_t obj);
+double       ape_object_get_number(ape_object_t obj);
+bool         ape_object_get_bool(ape_object_t obj);
 const char * ape_object_get_string(ape_object_t obj);
-const char * ape_object_get_error_message(ape_object_t obj);
+
+const char *           ape_object_get_error_message(ape_object_t obj);
 const ape_traceback_t* ape_object_get_error_traceback(ape_object_t obj);
 
 bool ape_object_set_external_destroy_function(ape_object_t object, ape_data_destroy_fn destroy_fn);
@@ -198,7 +199,7 @@ bool ape_object_add_array_bool(ape_object_t object, bool value);
 // Ape object map
 //-----------------------------------------------------------------------------
 
-int           ape_object_get_map_length(ape_object_t obj);
+int          ape_object_get_map_length(ape_object_t obj);
 ape_object_t ape_object_get_map_key_at(ape_object_t object, int ix);
 ape_object_t ape_object_get_map_value_at(ape_object_t object, int ix);
 
@@ -208,8 +209,8 @@ bool ape_object_set_map_string_with_string_key(ape_object_t object, const char *
 bool ape_object_set_map_number_with_string_key(ape_object_t object, const char *key, double number);
 bool ape_object_set_map_bool_with_string_key(ape_object_t object, const char *key, bool value);
 
-ape_object_t ape_object_get_map_value(ape_object_t object, ape_object_t key);
-ape_object_t ape_object_get_map_value_with_string_key(ape_object_t object, const char *key);
+ape_object_t  ape_object_get_map_value(ape_object_t object, ape_object_t key);
+ape_object_t  ape_object_get_map_value_with_string_key(ape_object_t object, const char *key);
 const char*   ape_object_get_map_string_with_string_key(ape_object_t object, const char *key);
 double        ape_object_get_map_number_with_string_key(ape_object_t object, const char *key);
 bool          ape_object_get_map_bool_with_string_key(ape_object_t object, const char *key);
