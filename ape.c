@@ -213,8 +213,9 @@ COLLECTIONS_API void        valdict_set_hash_function(valdict_t_ *dict, collecti
 COLLECTIONS_API void        valdict_set_equals_function(valdict_t_ *dict, collections_equals_fn equals_fn);
 COLLECTIONS_API bool        valdict_set(valdict_t_ *dict, void *key, void *value);
 COLLECTIONS_API void *      valdict_get(const valdict_t_ *dict, const void *key);
-COLLECTIONS_API void *      valdict_get_value_at(const valdict_t_ *dict, unsigned int ix);
 COLLECTIONS_API void *      valdict_get_key_at(const valdict_t_ *dict, unsigned int ix);
+COLLECTIONS_API void *      valdict_get_value_at(const valdict_t_ *dict, unsigned int ix);
+COLLECTIONS_API bool        valdict_set_value_at(const valdict_t_ *dict, unsigned int ix, const void *value);
 COLLECTIONS_API int         valdict_count(const valdict_t_ *dict);
 COLLECTIONS_API bool        valdict_remove(valdict_t_ *dict, void *key);
 COLLECTIONS_API void        valdict_clear(valdict_t_ *dict);
@@ -268,11 +269,13 @@ COLLECTIONS_API bool        array_setn(array_t_ *arr, unsigned int ix, void *val
 COLLECTIONS_API void *      array_get(const array_t_ *arr, unsigned int ix);
 COLLECTIONS_API void *      array_get_last(const array_t_ *arr);
 COLLECTIONS_API int         array_count(const array_t_ *arr);
-COLLECTIONS_API bool        array_remove(array_t_ *arr, unsigned int ix);
+COLLECTIONS_API bool        array_remove_at(array_t_ *arr, unsigned int ix);
+COLLECTIONS_API bool        array_remove_item(array_t_ *arr, void *ptr);
 COLLECTIONS_API void        array_clear(array_t_ *arr);
 COLLECTIONS_API void        array_clear_and_deinit_items_(array_t_ *arr, array_item_deinit_fn deinit_fn);
 COLLECTIONS_API void        array_lock_capacity(array_t_ *arr);
 COLLECTIONS_API int         array_get_index(const array_t_ *arr, void *ptr);
+COLLECTIONS_API bool        array_contains(const array_t_ *arr, void *ptr);
 COLLECTIONS_API void*       array_data(array_t_ *arr);
 COLLECTIONS_API const void* array_const_data(const array_t_ *arr);
 COLLECTIONS_API bool        array_orphan_data(array_t_ *arr);
@@ -307,12 +310,13 @@ COLLECTIONS_API bool         ptrarray_push(ptrarray_t_ *arr, void *ptr);
 COLLECTIONS_API void *       ptrarray_pop(ptrarray_t_ *arr);
 COLLECTIONS_API void *       ptrarray_top(ptrarray_t_ *arr);
 COLLECTIONS_API int          ptrarray_count(const ptrarray_t_ *arr);
-COLLECTIONS_API bool         ptrarray_remove(ptrarray_t_ *arr, unsigned int ix);
+COLLECTIONS_API bool         ptrarray_remove_at(ptrarray_t_ *arr, unsigned int ix);
 COLLECTIONS_API bool         ptrarray_remove_item(ptrarray_t_ *arr, void *item);
 COLLECTIONS_API void         ptrarray_clear(ptrarray_t_ *arr);
 COLLECTIONS_API void         ptrarray_clear_and_destroy_items_(ptrarray_t_ *arr, ptrarray_item_destroy_fn destroy_fn);
 COLLECTIONS_API void         ptrarray_lock_capacity(ptrarray_t_ *arr);
 COLLECTIONS_API int          ptrarray_get_index(ptrarray_t_ *arr, void *ptr);
+COLLECTIONS_API bool         ptrarray_contains(ptrarray_t_ *arr, void *ptr);
 COLLECTIONS_API void *       ptrarray_get_addr(ptrarray_t_ *arr, unsigned int ix);
 COLLECTIONS_API void*        ptrarray_data(ptrarray_t_ *arr);
 COLLECTIONS_API void         ptrarray_reverse(ptrarray_t_ *arr);
@@ -332,6 +336,16 @@ COLLECTIONS_API bool strbuf_appendf(strbuf_t *buf, const char *fmt, ...)  __attr
 COLLECTIONS_API const char * strbuf_get_string(const strbuf_t *buf);
 COLLECTIONS_API size_t strbuf_get_length(const strbuf_t *buf);
 COLLECTIONS_API char * strbuf_get_string_and_destroy(strbuf_t *buf);
+
+//-----------------------------------------------------------------------------
+// Utils
+//-----------------------------------------------------------------------------
+
+COLLECTIONS_API ptrarray(char)* kg_split_string(const char *str, const char *delimiter);
+COLLECTIONS_API char* kg_join(ptrarray(char) *items, const char *with);
+COLLECTIONS_API char* kg_canonicalise_path(const char *path);
+COLLECTIONS_API bool  kg_is_path_absolute(const char *path);
+COLLECTIONS_API bool  kg_streq(const char *a, const char *b);
 
 #endif /* collections_h */
 //FILE_END
@@ -474,7 +488,6 @@ APE_INTERNAL const char *token_type_to_string(token_type_t type);
 typedef struct lexer {
     const char *input;
     int input_len;
-    int line_start_position;
     int position;
     int next_position;
     char ch;
@@ -660,7 +673,7 @@ typedef struct for_loop_statement {
 } for_loop_statement_t;
 
 typedef struct import_statement {
-    char *name;
+    char *path;
 } import_statement_t;
 
 typedef struct statement {
@@ -691,7 +704,7 @@ APE_INTERNAL statement_t* statement_make_foreach(char *iterator_name, expression
 APE_INTERNAL statement_t* statement_make_for_loop(statement_t *init, expression_t *test, expression_t *update, code_block_t *body);
 APE_INTERNAL statement_t* statement_make_continue(void);
 APE_INTERNAL statement_t* statement_make_block(code_block_t *block);
-APE_INTERNAL statement_t* statement_make_import(const char *name);
+APE_INTERNAL statement_t* statement_make_import(const char *path);
 
 APE_INTERNAL void statement_destroy(statement_t *stmt);
 
@@ -962,23 +975,24 @@ typedef struct module {
 } module_t;
 
 typedef struct compiled_file {
-    char *name;
+    char *dir_path;
+    char *path;
     ptrarray(char*) *lines;
 } compiled_file_t;
 
 typedef struct file_scope {
     parser_t *parser;
-    char *filename;
     symbol_table_t *symbol_table;
     module_t *module;
     compiled_file_t *file;
+    ptrarray(char) *loaded_module_names;
 } file_scope_t;
 
 typedef struct compiler {
     const ape_config_t *config;
     gcmem_t *mem;
     compilation_scope_t *compilation_scope;
-    array(file_scope_t) *file_scopes;
+    ptrarray(file_scope_t) *file_scopes;
     array(object_t) *constants;
     ptrarray(error_t) *errors;
     array(src_pos_t) *src_positions_stack;
@@ -991,7 +1005,7 @@ typedef struct compiler {
 APE_INTERNAL compiler_t *compiler_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors);
 APE_INTERNAL void compiler_destroy(compiler_t *comp);
 APE_INTERNAL compilation_result_t* compiler_compile(compiler_t *comp, const char *code);
-APE_INTERNAL compilation_result_t* compiler_compile_file(compiler_t *comp, const char *filename);
+APE_INTERNAL compilation_result_t* compiler_compile_file(compiler_t *comp, const char *path);
 APE_INTERNAL int compiler_emit(compiler_t *comp, opcode_t op, int operands_count, uint64_t *operands);
 APE_INTERNAL compilation_scope_t* compiler_get_compilation_scope(compiler_t *comp);
 APE_INTERNAL void compiler_push_compilation_scope(compiler_t *comp);
@@ -1033,6 +1047,7 @@ typedef enum {
     OBJECT_MAP       = 1 << 7,
     OBJECT_FUNCTION  = 1 << 8,
     OBJECT_EXTERNAL  = 1 << 9,
+    OBJECT_FREED     = 1 << 10,
     OBJECT_ANY       = 0xffff,
 } object_type_t;
 
@@ -1118,6 +1133,7 @@ APE_INTERNAL char*       object_serialize(object_t object);
 APE_INTERNAL object_t    object_deep_copy(gcmem_t *mem, object_t object);
 APE_INTERNAL object_t    object_copy(gcmem_t *mem, object_t obj);
 APE_INTERNAL double      object_compare(object_t a, object_t b);
+APE_INTERNAL bool        object_equals(object_t a, object_t b);
 
 APE_INTERNAL object_data_t* object_get_allocated_data(object_t object);
 
@@ -1125,8 +1141,11 @@ APE_INTERNAL bool           object_get_bool(object_t obj);
 APE_INTERNAL double         object_get_number(object_t obj);
 APE_INTERNAL function_t*    object_get_function(object_t obj);
 APE_INTERNAL const char*    object_get_string(object_t obj);
-APE_INTERNAL object_type_t  object_get_type(object_t obj);
 APE_INTERNAL builtin_t*     object_get_builtin(object_t obj);
+APE_INTERNAL object_type_t  object_get_type(object_t obj);
+
+APE_INTERNAL bool object_is_null(object_t obj);
+APE_INTERNAL bool object_is_callable(object_t obj);
 
 APE_INTERNAL const char*  object_get_error_message(object_t obj);
 APE_INTERNAL void         object_set_error_traceback(object_t obj, traceback_t *traceback);
@@ -1145,9 +1164,11 @@ APE_INTERNAL int              object_get_array_length(object_t array);
 APE_INTERNAL int      object_get_map_length(object_t obj);
 APE_INTERNAL object_t object_get_map_key_at(object_t obj, int ix);
 APE_INTERNAL object_t object_get_map_value_at(object_t obj, int ix);
+APE_INTERNAL bool     object_set_map_value_at(object_t obj, int ix, object_t val);
 APE_INTERNAL object_t object_get_kv_pair_at(gcmem_t *mem, object_t obj, int ix);
 APE_INTERNAL bool     object_set_map_value(object_t obj, object_t key, object_t val);
 APE_INTERNAL object_t object_get_map_value(object_t obj, object_t key);
+APE_INTERNAL bool     object_map_has_key(object_t obj, object_t key);
 
 #endif /* object_h */
 //FILE_END
@@ -1167,6 +1188,8 @@ typedef struct env env_t;
 typedef struct gcmem {
     ptrarray(object_data_t) *objects;
     ptrarray(object_data_t) *objects_back;
+    
+    array(object_t) *objects_not_gced;
 } gcmem_t;
 
 APE_INTERNAL gcmem_t *gcmem_make(void);
@@ -1177,7 +1200,11 @@ APE_INTERNAL object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t 
 APE_INTERNAL void gc_unmark_all(gcmem_t *mem);
 APE_INTERNAL void gc_mark_objects(object_t *objects, int count);
 APE_INTERNAL void gc_mark_object(object_t object);
+APE_INTERNAL void gc_mark_object_data(object_data_t *data);
 APE_INTERNAL void gc_sweep(gcmem_t *mem);
+
+APE_INTERNAL void gc_disable_on_object(object_t obj);
+APE_INTERNAL void gc_enable_on_object(object_t obj);
 
 #endif /* gc_h */
 //FILE_END
@@ -1226,7 +1253,7 @@ APE_INTERNAL void traceback_append(traceback_t *traceback, const char *function_
 APE_INTERNAL void traceback_append_from_vm(traceback_t *traceback, vm_t *vm);
 APE_INTERNAL void traceback_to_string(const traceback_t *traceback, strbuf_t *buf);
 APE_INTERNAL const char* traceback_item_get_line(traceback_item_t *item);
-APE_INTERNAL const char* traceback_item_get_filename(traceback_item_t *item);
+APE_INTERNAL const char* traceback_item_get_filepath(traceback_item_t *item);
 
 #endif /* traceback_h */
 //FILE_END
@@ -1292,20 +1319,21 @@ typedef struct vm {
     int sp;
     array(frame_t) *frames;
     ptrarray(error_t) *errors;
-    bool running;
     object_t last_popped;
-
     frame_t *current_frame;
+    bool running;
 } vm_t;
 
-APE_INTERNAL vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors); // ape can be null (for internal testing purposes)
-APE_INTERNAL void vm_destroy(vm_t *vm);
+APE_INTERNAL vm_t* vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors); // ape can be null (for internal testing purposes)
+APE_INTERNAL void  vm_destroy(vm_t *vm);
+
+APE_INTERNAL void  vm_reset(vm_t *vm);
 
 APE_INTERNAL bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants);
 APE_INTERNAL object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc, object_t *args);
 APE_INTERNAL bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants);
 
-APE_INTERNAL object_t vm_last_popped(vm_t *vm);
+APE_INTERNAL object_t vm_get_last_popped(vm_t *vm);
 APE_INTERNAL bool vm_has_errors(vm_t *vm);
 
 APE_INTERNAL void vm_set_global(vm_t *vm, int ix, object_t val);
@@ -1809,7 +1837,6 @@ static unsigned int valdict_get_cell_ix(const valdict_t_ *dict,
                                         bool *out_found);
 static bool valdict_grow_and_rehash(valdict_t_ *dict);
 static bool valdict_set_key_at(valdict_t_ *dict, unsigned int ix, void *key);
-static bool valdict_set_value_at(valdict_t_ *dict, unsigned int ix, void *value);
 static bool valdict_keys_are_equal(const valdict_t_ *dict, const void *a, const void *b);
 static unsigned long valdict_hash_key(const valdict_t_ *dict, const void *key);
 
@@ -1880,6 +1907,13 @@ void* valdict_get(const valdict_t_ *dict, const void *key) {
     return valdict_get_value_at(dict, item_ix);
 }
 
+void* valdict_get_key_at(const valdict_t_ *dict, unsigned int ix) {
+    if (ix >= dict->count) {
+        return NULL;
+    }
+    return (char*)dict->keys + (dict->key_size * ix);
+}
+
 void *valdict_get_value_at(const valdict_t_ *dict, unsigned int ix) {
     if (ix >= dict->count) {
         return NULL;
@@ -1887,11 +1921,13 @@ void *valdict_get_value_at(const valdict_t_ *dict, unsigned int ix) {
     return (char*)dict->values + (dict->val_size * ix);
 }
 
-void* valdict_get_key_at(const valdict_t_ *dict, unsigned int ix) {
+bool valdict_set_value_at(const valdict_t_ *dict, unsigned int ix, const void *value) {
     if (ix >= dict->count) {
-        return NULL;
+        return false;
     }
-    return (char*)dict->keys + (dict->key_size * ix);
+    size_t offset = ix * dict->val_size;
+    memcpy((char*)dict->values + offset, value, dict->val_size);
+    return true;
 }
 
 int valdict_count(const valdict_t_ *dict) {
@@ -2065,15 +2101,6 @@ static bool valdict_set_key_at(valdict_t_ *dict, unsigned int ix, void *key) {
     }
     size_t offset = ix * dict->key_size;
     memcpy((char*)dict->keys + offset, key, dict->key_size);
-    return true;
-}
-
-static bool valdict_set_value_at(valdict_t_ *dict, unsigned int ix, void *value) {
-    if (ix >= dict->count) {
-        return false;
-    }
-    size_t offset = ix * dict->val_size;
-    memcpy((char*)dict->values + offset, value, dict->val_size);
     return true;
 }
 
@@ -2301,7 +2328,7 @@ bool array_pop(array_t_ *arr, void *out_value) {
         void *res = array_get(arr, arr->count - 1);
         memcpy(out_value, res, arr->element_size);
     }
-    array_remove(arr, arr->count - 1);
+    array_remove_at(arr, arr->count - 1);
     return true;
 }
 
@@ -2364,7 +2391,7 @@ int array_count(const array_t_ *arr) {
     return arr->count;
 }
 
-bool array_remove(array_t_ *arr, unsigned int ix) {
+bool array_remove_at(array_t_ *arr, unsigned int ix) {
     if (ix >= arr->count) {
         return false;
     }
@@ -2378,6 +2405,14 @@ bool array_remove(array_t_ *arr, unsigned int ix) {
     memmove(dest, src, to_move_bytes);
     arr->count--;
     return true;
+}
+
+bool array_remove_item(array_t_ *arr, void *ptr) {
+    int ix = array_get_index(arr, ptr);
+    if (ix < 0) {
+        return false;
+    }
+    return array_remove_at(arr, ix);
 }
 
 void array_clear(array_t_ *arr) {
@@ -2403,6 +2438,10 @@ int array_get_index(const array_t_ *arr, void *ptr) {
         }
     }
     return -1;
+}
+
+bool array_contains(const array_t_ *arr, void *ptr) {
+    return array_get_index(arr, ptr) >= 0;
 }
 
 void* array_data(array_t_ *arr) {
@@ -2545,7 +2584,7 @@ bool ptrarray_push(ptrarray_t_ *arr, void *ptr) {
 void *ptrarray_pop(ptrarray_t_ *arr) {
     int ix = ptrarray_count(arr) - 1;
     void *res = ptrarray_get(arr, ix);
-    ptrarray_remove(arr, ix);
+    ptrarray_remove_at(arr, ix);
     return res;
 }
 
@@ -2561,14 +2600,14 @@ int ptrarray_count(const ptrarray_t_ *arr) {
     return array_count(&arr->arr);
 }
 
-bool ptrarray_remove(ptrarray_t_ *arr, unsigned int ix) {
-    return array_remove(&arr->arr, ix);
+bool ptrarray_remove_at(ptrarray_t_ *arr, unsigned int ix) {
+    return array_remove_at(&arr->arr, ix);
 }
 
 bool ptrarray_remove_item(ptrarray_t_ *arr, void *item) {
     for (int i = 0; i < ptrarray_count(arr); i++) {
         if (item == ptrarray_get(arr, i)) {
-            ptrarray_remove(arr, i);
+            ptrarray_remove_at(arr, i);
             return true;
         }
     }
@@ -2599,6 +2638,10 @@ int ptrarray_get_index(ptrarray_t_ *arr, void *ptr) {
         }
     }
     return -1;
+}
+
+bool ptrarray_contains(ptrarray_t_ *arr, void *item) {
+    return ptrarray_get_index(arr, item) >= 0;
 }
 
 void * ptrarray_get_addr(ptrarray_t_ *arr, unsigned int ix) {
@@ -2735,6 +2778,80 @@ static bool strbuf_grow(strbuf_t *buf, size_t new_capacity) {
     buf->data = new_data;
     buf->capacity = new_capacity;
     return true;
+}
+
+//-----------------------------------------------------------------------------
+// Utils
+//-----------------------------------------------------------------------------
+
+ptrarray(char)* kg_split_string(const char *str, const char *delimiter) {
+    ptrarray(char)* res = ptrarray_make();
+    if (!str) {
+        return res;
+    }
+    const char *line_start = str;
+    const char *line_end = strstr(line_start, delimiter);
+    while (line_end != NULL) {
+        long len = line_end - line_start;
+        char *line = collections_strndup(line_start, len);
+        ptrarray_add(res, line);
+        line_start = line_end + 1;
+        line_end = strstr(line_start, delimiter);
+    }
+    char *rest = collections_strdup(line_start);
+    ptrarray_add(res, rest);
+    return res;
+}
+
+char* kg_join(ptrarray(char) *items, const char *with) {
+    strbuf_t *res = strbuf_make();
+    for (int i = 0; i < ptrarray_count(items); i++) {
+        char *item = ptrarray_get(items, i);
+        strbuf_append(res, item);
+        if (i < (ptrarray_count(items) - 1)) {
+            strbuf_append(res, with);
+        }
+    }
+    return strbuf_get_string_and_destroy(res);
+}
+
+char* kg_canonicalise_path(const char *path) {
+    if (!strchr(path, '/') || (!strstr(path, "/../") && !strstr(path, "./"))) {
+        return collections_strdup(path);
+    }
+
+    ptrarray(char) *split = kg_split_string(path, "/");
+
+    for (int i = 0; i < ptrarray_count(split) - 1; i++) {
+        char *item = ptrarray_get(split, i);
+        char *next_item = ptrarray_get(split, i + 1);
+        if (kg_streq(item, ".")) {
+            collections_free(item);
+            ptrarray_remove_at(split, i);
+            i = -1;
+            continue;
+        }
+        if (kg_streq(next_item, "..")) {
+            collections_free(item);
+            collections_free(next_item);
+            ptrarray_remove_at(split, i);
+            ptrarray_remove_at(split, i);
+            i = -1;
+            continue;
+        }
+    }
+
+    char *joined = kg_join(split, "/");
+    ptrarray_destroy_with_items(split, collections_free);
+    return joined;
+}
+
+bool kg_is_path_absolute(const char *path) {
+    return path[0] == '/';
+}
+
+bool kg_streq(const char *a, const char *b) {
+    return strcmp(a, b) == 0;
 }
 //FILE_END
 //FILE_START:error.c
@@ -2888,12 +3005,11 @@ static const char* read_number(lexer_t *lex, int *out_len);
 static const char* read_string(lexer_t *lex, char delimiter, int *out_len);
 static token_type_t lookup_identifier(const char *ident, int len);
 static void skip_whitespace(lexer_t *lex);
-static void add_line(lexer_t *lex);
+static void add_line(lexer_t *lex, int offset);
 
 bool lexer_init(lexer_t *lex, const char *input, compiled_file_t *file) {
     lex->input = input;
     lex->input_len = (int)strlen(input);
-    lex->line_start_position = 0;
     lex->position = 0;
     lex->next_position = 0;
     lex->ch = '\0';
@@ -2904,6 +3020,7 @@ bool lexer_init(lexer_t *lex, const char *input, compiled_file_t *file) {
     }
     lex->column = -1;
     lex->file = file;
+    add_line(lex, 0);
     read_char(lex);
     return true;
 }
@@ -3071,9 +3188,6 @@ token_t lexer_next_token(lexer_t *lex) {
 // INTERNAL
 static void read_char(lexer_t *lex) {
     if (lex->next_position >= lex->input_len) {
-        if (lex->ch != '\0') {
-            add_line(lex);
-        }
         lex->ch = '\0';
     } else {
         lex->ch = lex->input[lex->next_position];
@@ -3082,10 +3196,9 @@ static void read_char(lexer_t *lex) {
     lex->next_position++;
     
     if (lex->ch == '\n') {
-        add_line(lex);
-        lex->line_start_position = lex->next_position;
         lex->line++;
         lex->column = -1;
+        add_line(lex, lex->next_position);
     } else {
         lex->column++;
     }
@@ -3208,11 +3321,11 @@ static void skip_whitespace(lexer_t *lex) {
     }
 }
 
-static void add_line(lexer_t *lex) {
+static void add_line(lexer_t *lex, int offset) {
     if (!lex->file) {
         return;
     }
-    const char *line_start = lex->input + lex->line_start_position;
+    const char *line_start = lex->input + offset;
     const char *new_line_ptr = strchr(line_start, '\n');
     char *line = NULL;
     if (!new_line_ptr) {
@@ -3563,9 +3676,9 @@ statement_t* statement_make_block(code_block_t *block) {
     return res;
 }
 
-statement_t* statement_make_import(const char *name) {
+statement_t* statement_make_import(const char *path) {
     statement_t *res = statement_make(STATEMENT_IMPORT);
-    res->import.name = ape_strdup(name);
+    res->import.path = ape_strdup(path);
     return res;
 }
 
@@ -3625,7 +3738,7 @@ void statement_destroy(statement_t *stmt) {
             break;
         }
         case STATEMENT_IMPORT: {
-            ape_free(stmt->import.name);
+            ape_free(stmt->import.path);
             break;
         }
     }
@@ -3698,7 +3811,7 @@ statement_t* statement_copy(statement_t *stmt) {
             break;
         }
         case STATEMENT_IMPORT: {
-            res = statement_make_import(stmt->import.name);
+            res = statement_make_import(stmt->import.path);
             break;
         }
     }
@@ -3843,7 +3956,7 @@ void statement_to_string(const statement_t *stmt, strbuf_t *buf) {
             break;
         }
         case STATEMENT_IMPORT: {
-            strbuf_appendf(buf, "import \"%s\"", stmt->import.name);
+            strbuf_appendf(buf, "import \"%s\"", stmt->import.path);
             break;
         }
         case STATEMENT_NONE: {
@@ -5763,7 +5876,7 @@ static int  get_ip(compiler_t *comp);
 static array(src_pos_t)* get_src_positions(compiler_t *comp);
 static array(uint8_t)*   get_bytecode(compiler_t *comp);
 
-static void push_file_scope(compiler_t *comp, const char *filename, module_t *module);
+static void push_file_scope(compiler_t *comp, const char *filepath, module_t *module);
 static void pop_file_scope(compiler_t *comp);
 
 static void set_compilation_scope(compiler_t *comp, compilation_scope_t *scope);
@@ -5773,8 +5886,10 @@ static module_t* module_make(const char *name);
 static void module_destroy(module_t *module);
 static void module_add_symbol(module_t *module, const symbol_t *symbol);
 
-static compiled_file_t *compiled_file_make(const char *name);
+static compiled_file_t* compiled_file_make(const char *path);
 static void compiled_file_destroy(compiled_file_t *file);
+
+static const char* get_module_name(const char *path);
 
 compiler_t *compiler_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors) {
     compiler_t *comp = ape_malloc(sizeof(compiler_t));
@@ -5782,7 +5897,7 @@ compiler_t *compiler_make(const ape_config_t *config, gcmem_t *mem, ptrarray(err
     APE_ASSERT(config);
     comp->config = config;
     comp->mem = mem;
-    comp->file_scopes = array_make(file_scope_t);
+    comp->file_scopes = ptrarray_make();
     comp->constants = array_make(object_t);
     comp->errors = errors;
     comp->break_ip_stack = array_make(int);
@@ -5806,10 +5921,10 @@ void compiler_destroy(compiler_t *comp) {
     while (compiler_get_compilation_scope(comp)) {
         compiler_pop_compilation_scope(comp);
     }
-    while (array_count(comp->file_scopes) > 0) {
+    while (ptrarray_count(comp->file_scopes) > 0) {
         pop_file_scope(comp);
     }
-    array_destroy(comp->file_scopes);
+    ptrarray_destroy(comp->file_scopes);
     ptrarray_destroy_with_items(comp->files, compiled_file_destroy);
     dict_destroy_with_items(comp->modules, module_destroy);
     ape_free(comp);
@@ -5848,25 +5963,25 @@ compilation_result_t* compiler_compile(compiler_t *comp, const char *code) {
     return compilation_scope_orphan_result(compilation_scope);
 }
 
-compilation_result_t* compiler_compile_file(compiler_t *comp, const char *filename) {
+compilation_result_t* compiler_compile_file(compiler_t *comp, const char *path) {
     if (!comp->config->fileio.read_file.read_file) {
         error_t *err = error_make(ERROR_COMPILATION, src_pos_invalid, "File read function not configured");
         ptrarray_add(comp->errors, err);
         return NULL;
     }
 
-    char *code = comp->config->fileio.read_file.read_file(comp->config->fileio.read_file.context, filename);
+    char *code = comp->config->fileio.read_file.read_file(comp->config->fileio.read_file.context, path);
     if (!code) {
-        error_t *err = error_makef(ERROR_COMPILATION, src_pos_invalid, "Reading file \"%s\" failed", filename);
+        error_t *err = error_makef(ERROR_COMPILATION, src_pos_invalid, "Reading file \"%s\" failed", path);
         ptrarray_add(comp->errors, err);
         return NULL;
     }
 
-    compiled_file_t *file = compiled_file_make(filename);
+    compiled_file_t *file = compiled_file_make(path);
     ptrarray_add(comp->files, file);
 
-    APE_ASSERT(array_count(comp->file_scopes) == 1);
-    file_scope_t *file_scope = array_top(comp->file_scopes);
+    APE_ASSERT(ptrarray_count(comp->file_scopes) == 1);
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     if (!file_scope) {
         APE_ASSERT(false);
         ape_free(code);
@@ -5900,7 +6015,7 @@ void compiler_pop_compilation_scope(compiler_t *comp) {
 }
 
 void compiler_push_symbol_table(compiler_t *comp) {
-    file_scope_t *file_scope = array_top(comp->file_scopes);
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     if (!file_scope) {
         APE_ASSERT(false);
         return;
@@ -5910,7 +6025,7 @@ void compiler_push_symbol_table(compiler_t *comp) {
 }
 
 void compiler_pop_symbol_table(compiler_t *comp) {
-    file_scope_t *file_scope = array_top(comp->file_scopes);
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     if (!file_scope) {
         APE_ASSERT(false);
         return;
@@ -5925,7 +6040,7 @@ void compiler_pop_symbol_table(compiler_t *comp) {
 }
 
 symbol_table_t* compiler_get_symbol_table(compiler_t *comp) {
-    file_scope_t *file_scope = array_top(comp->file_scopes);
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     if (!file_scope) {
         APE_ASSERT(false);
         return NULL;
@@ -5938,7 +6053,7 @@ symbol_table_t* compiler_get_symbol_table(compiler_t *comp) {
 }
 
 void compiler_set_symbol_table(compiler_t *comp, symbol_table_t *table) {
-    file_scope_t *file_scope = array_top(comp->file_scopes);
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     if (!file_scope) {
         APE_ASSERT(false);
         return;
@@ -5953,7 +6068,7 @@ opcode_t compiler_last_opcode(compiler_t *comp) {
 
 // INTERNAL
 static bool compile_code(compiler_t *comp, const char *code) {
-    file_scope_t *file_scope = array_top(comp->file_scopes);
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     APE_ASSERT(file_scope);
 
     ptrarray(statement_t) *statements = parser_parse_all(file_scope->parser, code, file_scope->file);
@@ -5982,59 +6097,82 @@ static bool compile_statements(compiler_t *comp, ptrarray(statement_t) *statemen
 }
 
 static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
-    const char *module_name = import_stmt->import.name;
+    bool result = false;
+    char *filepath = NULL;
+
+    file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
+
+    const char *module_path = import_stmt->import.path;
+    const char *module_name = get_module_name(module_path);
+
+    for (int i = 0; i < ptrarray_count(file_scope->loaded_module_names); i++) {
+        const char *loaded_name = ptrarray_get(file_scope->loaded_module_names, i);
+        if (kg_streq(loaded_name, module_name)) {
+            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Module \"%s\" was already imported", module_name);
+            ptrarray_add(comp->errors, err);
+            result = false;
+            goto end;
+        }
+    }
+
+    strbuf_t *filepath_buf = strbuf_make();
+    if (kg_is_path_absolute(module_path)) {
+        strbuf_appendf(filepath_buf, "%s.bn", module_path);
+    } else {
+        strbuf_appendf(filepath_buf, "%s%s.bn", file_scope->file->dir_path, module_path);
+    }
+    const char *filepath_non_canonicalised = strbuf_get_string(filepath_buf);
+    filepath = kg_canonicalise_path(filepath_non_canonicalised);
+    strbuf_destroy(filepath_buf);
 
     symbol_table_t *symbol_table = compiler_get_symbol_table(comp);
     if (symbol_table->outer != NULL || ptrarray_count(symbol_table->block_scopes) > 1) {
         error_t *err = error_make(ERROR_COMPILATION, import_stmt->pos, "Modules can only be imported in global scope");
         ptrarray_add(comp->errors, err);
-        return false;
+        result = false;
+        goto end;
     }
 
-    for (int i = 0; i < array_count(comp->file_scopes); i++) {
-        file_scope_t *fs = array_get(comp->file_scopes, i);
-        if (!fs->module) {
-            continue;
-        }
-        if (APE_STREQ(fs->module->name, module_name)) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Cyclic reference of module \"%s\"", module_name);
+    for (int i = 0; i < ptrarray_count(comp->file_scopes); i++) {
+        file_scope_t *fs = ptrarray_get(comp->file_scopes, i);
+        if (APE_STREQ(fs->file->path, filepath)) {
+            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Cyclic reference of file \"%s\"", filepath);
             ptrarray_add(comp->errors, err);
-            return false;
+            result = false;
+            goto end;
         }
     }
 
-    module_t *module = dict_get(comp->modules, module_name);
+    module_t *module = dict_get(comp->modules, filepath);
     if (!module) {
         if (!comp->config->fileio.read_file.read_file) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Cannot import module \"%s\", file read function not configured", module_name);
+            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Cannot import module \"%s\", file read function not configured", filepath);
             ptrarray_add(comp->errors, err);
-            return false;
+            result = false;
+            goto end;
         }
 
-        strbuf_t *filename_buf = strbuf_make();
-        strbuf_appendf(filename_buf, "%s.bn", module_name);
-        const char *filename = strbuf_get_string(filename_buf);
-        char *code = comp->config->fileio.read_file.read_file(comp->config->fileio.read_file.context, filename);
+        char *code = comp->config->fileio.read_file.read_file(comp->config->fileio.read_file.context, filepath);
         if (!code) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Reading module file \"%s\" failed", module_name);
+            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Reading module file \"%s\" failed", filepath);
             ptrarray_add(comp->errors, err);
-            strbuf_destroy(filename_buf);
-            return false;
+            result = false;
+            goto end;
         }
 
         module = module_make(module_name);
-        push_file_scope(comp, filename, module);
+        push_file_scope(comp, filepath, module);
         bool ok = compile_code(comp, code);
         pop_file_scope(comp);
         ape_free(code);
-        strbuf_destroy(filename_buf);
 
         if (!ok) {
             module_destroy(module);
-            return false;
+            result = false;
+            goto end;
         }
 
-        dict_set(comp->modules, module->name, module);
+        dict_set(comp->modules, filepath, module);
     }
 
     for (int i = 0; i < ptrarray_count(module->symbols); i++) {
@@ -6042,7 +6180,13 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
         symbol_table_add_module_symbol(symbol_table, symbol);
     }
 
-    return true;
+    ptrarray_add(file_scope->loaded_module_names, ape_strdup(module_name));
+    
+    result = true;
+
+end:
+    ape_free(filepath);
+    return result;
 }
 
 static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
@@ -6838,21 +6982,21 @@ static array(uint8_t)* get_bytecode(compiler_t *comp) {
     return compilation_scope->bytecode;
 }
 
-static void push_file_scope(compiler_t *comp, const char *filename, module_t *module) {
+static void push_file_scope(compiler_t *comp, const char *filepath, module_t *module) {
     symbol_table_t *prev_st = NULL;
-    if (array_count(comp->file_scopes) > 0) {
+    if (ptrarray_count(comp->file_scopes) > 0) {
         prev_st = compiler_get_symbol_table(comp);
     }
-    file_scope_t file_scope;
-    memset(&file_scope, 0, sizeof(file_scope_t));
-    file_scope.filename = ape_strdup(filename);
-    file_scope.parser = parser_make(comp->config, comp->errors);
-    file_scope.symbol_table = NULL;
-    file_scope.module = module;
-    file_scope.file = compiled_file_make(filename);
-    ptrarray_add(comp->files, file_scope.file);
+    file_scope_t *file_scope = ape_malloc(sizeof(file_scope_t));
+    memset(file_scope, 0, sizeof(file_scope_t));
+    file_scope->parser = parser_make(comp->config, comp->errors);
+    file_scope->symbol_table = NULL;
+    file_scope->module = module;
+    file_scope->file = compiled_file_make(filepath);
+    ptrarray_add(comp->files, file_scope->file);
+    file_scope->loaded_module_names = ptrarray_make();
 
-    array_push(comp->file_scopes, &file_scope);
+    ptrarray_push(comp->file_scopes, file_scope);
     compiler_push_symbol_table(comp);
 
     if (prev_st) {
@@ -6868,7 +7012,7 @@ static void pop_file_scope(compiler_t *comp) {
     block_scope_t *popped_st_top_scope = symbol_table_get_block_scope(popped_st);
     int popped_num_defs = popped_st_top_scope->num_definitions;
 
-    file_scope_t *scope = array_top(comp->file_scopes);
+    file_scope_t *scope = ptrarray_top(comp->file_scopes);
     if (!scope) {
         APE_ASSERT(false);
         return;
@@ -6876,11 +7020,15 @@ static void pop_file_scope(compiler_t *comp) {
     while (compiler_get_symbol_table(comp)) {
         compiler_pop_symbol_table(comp);
     }
+    ptrarray_destroy_with_items(scope->loaded_module_names, ape_free);
+    scope->loaded_module_names = NULL;
+    
     parser_destroy(scope->parser);
-    ape_free(scope->filename);
-    array_pop(comp->file_scopes, NULL);
 
-    if (array_count(comp->file_scopes) > 0) {
+    ape_free(scope);
+    ptrarray_pop(comp->file_scopes);
+
+    if (ptrarray_count(comp->file_scopes) > 0) {
         symbol_table_t *current_st = compiler_get_symbol_table(comp);
         block_scope_t *current_st_top_scope = symbol_table_get_block_scope(current_st);
         current_st_top_scope->num_definitions += popped_num_defs;
@@ -6892,7 +7040,7 @@ static void set_compilation_scope(compiler_t *comp, compilation_scope_t *scope) 
 }
 
 static module_t* get_current_module(compiler_t *comp) {
-    file_scope_t *scope = array_top(comp->file_scopes);
+    file_scope_t *scope = ptrarray_top(comp->file_scopes);
     return scope->module;
 }
 
@@ -6917,9 +7065,16 @@ static void module_add_symbol(module_t *module, const symbol_t *symbol) {
     ptrarray_add(module->symbols, module_symbol);
 }
 
-static compiled_file_t *compiled_file_make(const char *name) {
+static compiled_file_t* compiled_file_make(const char *path) {
     compiled_file_t *file = ape_malloc(sizeof(compiled_file_t));
-    file->name = ape_strdup(name);
+    const char *last_slash_pos = strrchr(path, '/');
+    if (last_slash_pos) {
+        size_t len = last_slash_pos - path + 1;
+        file->dir_path = ape_strndup(path, len);
+    } else {
+        file->dir_path = ape_strdup("");
+    }
+    file->path = ape_strdup(path);
     file->lines = ptrarray_make();
     return file;
 }
@@ -6929,8 +7084,17 @@ static void compiled_file_destroy(compiled_file_t *file) {
         return;
     }
     ptrarray_destroy_with_items(file->lines, ape_free);
-    ape_free(file->name);
+    ape_free(file->dir_path);
+    ape_free(file->path);
     ape_free(file);
+}
+
+static const char* get_module_name(const char *path) {
+    const char *last_slash_pos = strrchr(path, '/');
+    if (last_slash_pos) {
+        return last_slash_pos + 1;
+    }
+    return path;
 }
 //FILE_END
 //FILE_START:object.c
@@ -6957,7 +7121,7 @@ static void compiled_file_destroy(compiled_file_t *file) {
 
 static object_t object_make(object_type_t type, object_data_t *data);
 static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(object_t, object_t) *copies);
-static bool object_equals(const object_t *a, const object_t *b);
+static bool object_equals_wrapped(const object_t *a, const object_t *b);
 static unsigned long object_hash(object_t *obj_ptr);
 static unsigned long object_hash_string(const char *str);
 static unsigned long object_hash_double(double val);
@@ -7028,7 +7192,7 @@ object_t object_make_map(gcmem_t *mem) {
     object_data_t *data = gcmem_alloc_object_data(mem, OBJECT_MAP);
     data->map = valdict_make(object_t, object_t);
     valdict_set_hash_function(data->map, (collections_hash_fn)object_hash);
-    valdict_set_equals_function(data->map, (collections_equals_fn)object_equals);
+    valdict_set_equals_function(data->map, (collections_equals_fn)object_equals_wrapped);
     return object_make(OBJECT_MAP, data);
 }
 
@@ -7085,6 +7249,10 @@ void object_deinit(object_t obj) {
 
 void object_data_deinit(object_data_t *data) {
     switch (data->type) {
+        case OBJECT_FREED: {
+            APE_ASSERT(false);
+            return;
+        }
         case OBJECT_STRING: {
             ape_free(data->string);
             break;
@@ -7124,6 +7292,7 @@ void object_data_deinit(object_data_t *data) {
             break;
         }
     }
+    data->type = OBJECT_FREED;
 }
 
 bool object_is_allocated(object_t object) {
@@ -7148,6 +7317,10 @@ bool object_is_hashable(object_t obj) {
 void object_to_string(object_t obj, strbuf_t *buf, bool quote_str) {
     object_type_t type = object_get_type(obj);
     switch (type) {
+        case OBJECT_FREED: {
+            strbuf_append(buf, "FREED");
+            break;
+        }
         case OBJECT_NONE: {
             strbuf_append(buf, "NONE");
             break;
@@ -7233,18 +7406,19 @@ void object_to_string(object_t obj, strbuf_t *buf, bool quote_str) {
 
 const char *object_get_type_name(const object_type_t type) {
     switch (type) {
-        case OBJECT_NONE: return "NONE";
-        case OBJECT_NUMBER: return "NUMBER";
-        case OBJECT_BOOL: return "BOOL";
-        case OBJECT_STRING: return "STRING";
-        case OBJECT_NULL: return "NULL";
-        case OBJECT_BUILTIN: return "BUILTIN";
-        case OBJECT_ARRAY: return "ARRAY";
-        case OBJECT_MAP: return "MAP";
+        case OBJECT_NONE:     return "NONE";
+        case OBJECT_FREED:    return "NONE";
+        case OBJECT_NUMBER:   return "NUMBER";
+        case OBJECT_BOOL:     return "BOOL";
+        case OBJECT_STRING:   return "STRING";
+        case OBJECT_NULL:     return "NULL";
+        case OBJECT_BUILTIN:  return "BUILTIN";
+        case OBJECT_ARRAY:    return "ARRAY";
+        case OBJECT_MAP:      return "MAP";
         case OBJECT_FUNCTION: return "FUNCTION";
         case OBJECT_EXTERNAL: return "EXTERNAL";
-        case OBJECT_ERROR: return "ERROR";
-        case OBJECT_ANY: return "ANY";
+        case OBJECT_ERROR:    return "ERROR";
+        case OBJECT_ANY:      return "ANY";
     }
     return "NONE";
 }
@@ -7268,6 +7442,7 @@ object_t object_copy(gcmem_t *mem, object_t obj) {
     object_type_t type = object_get_type(obj);
     switch (type) {
         case OBJECT_ANY:
+        case OBJECT_FREED:
         case OBJECT_NONE: {
             APE_ASSERT(false);
             copy = object_make_null();
@@ -7347,6 +7522,17 @@ double object_compare(object_t a, object_t b) {
     }
 }
 
+bool object_equals(object_t a, object_t b) {
+    object_type_t a_type = object_get_type(a);
+    object_type_t b_type = object_get_type(b);
+
+    if (a_type != b_type) {
+        return false;
+    }
+    double res = object_compare(a, b);
+    return APE_DBLEQ(res, 0);
+}
+
 external_data_t* object_get_external_data(object_t object) {
     APE_ASSERT(object_get_type(object) == OBJECT_EXTERNAL);
     object_data_t *data = object_get_allocated_data(object);
@@ -7394,6 +7580,11 @@ function_t* object_get_function(object_t object) {
     return &data->function;
 }
 
+builtin_t* object_get_builtin(object_t obj) {
+    object_data_t *data = object_get_allocated_data(obj);
+    return &data->builtin;
+}
+
 object_type_t object_get_type(object_t obj) {
     if (object_is_number(obj)) {
         return OBJECT_NUMBER;
@@ -7411,9 +7602,13 @@ object_type_t object_get_type(object_t obj) {
     }
 }
 
-builtin_t* object_get_builtin(object_t obj) {
-    object_data_t *data = object_get_allocated_data(obj);
-    return &data->builtin;
+bool object_is_null(object_t obj) {
+    return object_get_type(obj) == OBJECT_NULL;
+}
+
+bool object_is_callable(object_t obj) {
+    object_type_t type = object_get_type(obj);
+    return type == OBJECT_BUILTIN || type == OBJECT_FUNCTION;
 }
 
 const char* object_get_error_message(object_t object) {
@@ -7511,6 +7706,16 @@ object_t object_get_map_value_at(object_t object, int ix) {
     return *res;
 }
 
+bool object_set_map_value_at(object_t object, int ix, object_t val) {
+    APE_ASSERT(object_get_type(object) == OBJECT_MAP);
+    if (ix >= object_get_map_length(object)) {
+        return false;
+    }
+    object_data_t *data = object_get_allocated_data(object);
+    bool res = valdict_set_value_at(data->map, ix, &val);
+    return res;
+}
+
 object_t object_get_kv_pair_at(gcmem_t *mem, object_t object, int ix) {
     APE_ASSERT(object_get_type(object) == OBJECT_MAP);
     object_data_t *data = object_get_allocated_data(object);
@@ -7541,6 +7746,13 @@ object_t object_get_map_value(object_t object, object_t key) {
     return *res;
 }
 
+bool object_map_has_key(object_t object, object_t key) {
+    APE_ASSERT(object_get_type(object) == OBJECT_MAP);
+    object_data_t *data = object_get_allocated_data(object);
+    object_t *res = valdict_get(data->map, &key);
+    return res != NULL;
+}
+
 // INTERNAL
 static object_t object_make(object_type_t type, object_data_t *data) {
     object_t object;
@@ -7561,6 +7773,7 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
 
     object_type_t type = object_get_type(obj);
     switch (type) {
+        case OBJECT_FREED:
         case OBJECT_ANY:
         case OBJECT_NONE: {
             APE_ASSERT(false);
@@ -7632,17 +7845,10 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
     return copy;
 }
 
-static bool object_equals(const object_t *a_ptr, const object_t *b_ptr) {
+static bool object_equals_wrapped(const object_t *a_ptr, const object_t *b_ptr) {
     object_t a = *a_ptr;
     object_t b = *b_ptr;
-    object_type_t a_type = object_get_type(a);
-    object_type_t b_type = object_get_type(b);
-
-    if (a_type != b_type) {
-        return false;
-    }
-    double res = object_compare(a, b);
-    return APE_DBLEQ(res, 0);
+    return object_equals(a, b);
 }
 
 static unsigned long object_hash(object_t *obj_ptr) {
@@ -7713,6 +7919,7 @@ gcmem_t *gcmem_make() {
     memset(mem, 0, sizeof(gcmem_t));
     mem->objects = ptrarray_make();
     mem->objects_back = ptrarray_make();
+    mem->objects_not_gced = array_make(object_t);
     return mem;
 }
 
@@ -7727,6 +7934,8 @@ void gcmem_destroy(gcmem_t *mem) {
     }
     ptrarray_destroy(mem->objects);
     ptrarray_destroy(mem->objects_back);
+    array_destroy(mem->objects_not_gced);
+    memset(mem, 0, sizeof(gcmem_t));
     ape_free(mem);
 }
 
@@ -7761,6 +7970,7 @@ void gc_mark_object(object_t obj) {
     if (data->gcmark) {
         return;
     }
+
     data->gcmark = true;
     switch (data->type) {
         case OBJECT_MAP: {
@@ -7796,6 +8006,8 @@ void gc_mark_object(object_t obj) {
 }
 
 void gc_sweep(gcmem_t *mem) {
+    gc_mark_objects(array_data(mem->objects_not_gced), array_count(mem->objects_not_gced));
+
     ptrarray_clear(mem->objects_back);
     for (int i = 0; i < ptrarray_count(mem->objects); i++) {
         object_data_t *data = ptrarray_get(mem->objects, i);
@@ -7809,6 +8021,25 @@ void gc_sweep(gcmem_t *mem) {
     ptrarray(object_t) *objs_temp = mem->objects;
     mem->objects = mem->objects_back;
     mem->objects_back = objs_temp;
+}
+
+void gc_disable_on_object(object_t obj) {
+    if (!object_is_allocated(obj)) {
+        return;
+    }
+    object_data_t *data = object_get_allocated_data(obj);
+    if (array_contains(data->mem->objects_not_gced, &obj)) {
+        return;
+    }
+    array_add(data->mem->objects_not_gced, &obj);
+}
+
+void gc_enable_on_object(object_t obj) {
+    if (!object_is_allocated(obj)) {
+        return;
+    }
+    object_data_t *data = object_get_allocated_data(obj);
+    array_remove_item(data->mem->objects_not_gced, &obj);
 }
 //FILE_END
 //FILE_START:builtins.c
@@ -7831,6 +8062,7 @@ static object_t reverse_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t array_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t append_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t remove_fn(vm_t *vm, void *data, int argc, object_t *args);
+static object_t remove_at_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t println_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t print_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t read_file_fn(vm_t *vm, void *data, int argc, object_t *args);
@@ -7893,6 +8125,7 @@ static struct {
     {"rest",        rest_fn},
     {"append",      append_fn},
     {"remove",      remove_fn},
+    {"remove_at",   remove_at_fn},
     {"to_str",      to_str_fn},
     {"range",       range_fn},
     {"keys",        keys_fn},
@@ -8325,6 +8558,30 @@ static object_t assert_fn(vm_t *vm, void *data, int argc, object_t *args) {
 
 static object_t remove_fn(vm_t *vm, void *data, int argc, object_t *args) {
     (void)data;
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_ARRAY, OBJECT_ANY)) {
+        return object_make_null();
+    }
+
+    int ix = -1;
+    for (int i = 0; i < object_get_array_length(args[0]); i++) {
+        object_t obj = object_get_array_value_at(args[0], i);
+        if (object_equals(obj, args[1])) {
+            ix = i;
+            break;
+        }
+    }
+
+    if (ix == -1) {
+        return object_make_bool(false);
+    }
+
+    array(object_t) *arr = object_get_array(args[0]);
+    bool res = array_remove_at(arr, ix);
+    return object_make_bool(res);
+}
+
+static object_t remove_at_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_ARRAY, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -8335,7 +8592,7 @@ static object_t remove_fn(vm_t *vm, void *data, int argc, object_t *args) {
     switch (type) {
         case OBJECT_ARRAY: {
             array(object_t) *arr = object_get_array(args[0]);
-            bool res = array_remove(arr, ix);
+            bool res = array_remove_at(arr, ix);
             return object_make_bool(res);
         }
         default:
@@ -8344,6 +8601,7 @@ static object_t remove_fn(vm_t *vm, void *data, int argc, object_t *args) {
 
     return object_make_bool(true);
 }
+
 
 static object_t error_fn(vm_t *vm, void *data, int argc, object_t *args) {
     (void)data;
@@ -8618,7 +8876,7 @@ void traceback_to_string(const traceback_t *traceback, strbuf_t *buf) {
     int depth  = array_count(traceback->items);
     for (int i = 0; i < depth; i++) {
         traceback_item_t *item = array_get(traceback->items, i);
-        const char *filename = traceback_item_get_filename(item);
+        const char *filename = traceback_item_get_filepath(item);
         if (item->pos.line >= 0 && item->pos.column >= 0) {
             strbuf_appendf(buf, "%s in %s on %d:%d\n", item->function_name, filename, item->pos.line, item->pos.column);
         } else {
@@ -8639,11 +8897,11 @@ const char* traceback_item_get_line(traceback_item_t *item) {
     return line;
 }
 
-const char* traceback_item_get_filename(traceback_item_t *item) {
+const char* traceback_item_get_filepath(traceback_item_t *item) {
     if (!item->pos.file) {
         return NULL;
     }
-    return item->pos.file->name;
+    return item->pos.file->path;
 }
 //FILE_END
 //FILE_START:frame.c
@@ -8731,6 +8989,7 @@ static object_t stack_get(vm_t *vm, int nth_item);
 static void push_frame(vm_t *vm, frame_t frame);
 static bool pop_frame(vm_t *vm);
 static void run_gc(vm_t *vm, array(object_t) *constants);
+static bool call_object(vm_t *vm, object_t callee, int num_args);
 static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args);
 
 vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors) {
@@ -8743,8 +9002,8 @@ vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *error
     vm->frames = array_make(frame_t);
     vm->builtins = array_make(object_t);
     vm->errors = errors;
-    vm->running = false;
     vm->last_popped = object_make_null();
+    vm->running = false;
 
     for (int i = 0; i < builtins_count(); i++) {
         object_t builtin = object_make_builtin(vm->mem, builtins_get_name(i), builtins_get_fn(i), vm);
@@ -8763,14 +9022,31 @@ void vm_destroy(vm_t *vm) {
     ape_free(vm);
 }
 
+void vm_reset(vm_t *vm) {
+    vm->sp = 0;
+    while (array_count(vm->frames) > 0) {
+        pop_frame(vm);
+    }
+}
+
 bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants) {
+    int old_sp = vm->sp;
+    int old_frames_count = array_count(vm->frames);
     object_t main_fn = object_make_function(vm->mem, "main", comp_res, false, 0, 0);
-    return vm_execute_function(vm, main_fn, constants);
+    stack_push(vm, main_fn);
+    bool res = vm_execute_function(vm, main_fn, constants);
+    while (array_count(vm->frames) > old_frames_count) {
+        pop_frame(vm);
+    }
+    APE_ASSERT(vm->sp == old_sp);
+    return res;
 }
 
 object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc, object_t *args) {
     object_type_t type = object_get_type(callee);
     if (type == OBJECT_FUNCTION) {
+        int old_sp = vm->sp;
+        int old_frames_count = array_count(vm->frames);
         stack_push(vm, callee);
         for (int i = 0; i < argc; i++) {
             stack_push(vm, args[i]);
@@ -8779,7 +9055,11 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
         if (!ok) {
             return object_make_null();
         }
-        return vm_last_popped(vm);
+        while (array_count(vm->frames) > old_frames_count) {
+            pop_frame(vm);
+        }
+        APE_ASSERT(vm->sp == old_sp);
+        return vm_get_last_popped(vm);
     } else if (type == OBJECT_BUILTIN) {
         return call_builtin(vm, callee, src_pos_invalid, argc, args);
     } else {
@@ -8796,13 +9076,13 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
         return false;
     }
 
-    vm->last_popped = object_make_null();
     vm->running = true;
+
+    vm->last_popped = object_make_null();
 
     function_t *function_function = object_get_function(function); // naming is hard
     frame_t new_frame;
     frame_init(&new_frame, function, vm->sp - function_function->num_args);
-    set_sp(vm, new_frame.base_pointer + function_function->num_locals);
     push_frame(vm, new_frame);
 
     int ticks_between_gc = 0;
@@ -8837,7 +9117,6 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 object_t left = stack_pop(vm);
                 object_type_t left_type = object_get_type(left);
                 object_type_t right_type = object_get_type(right);
-                object_t res_obj = object_make_null();
                 if (left_type == OBJECT_NUMBER && right_type == OBJECT_NUMBER) {
                     double right_val = object_get_number(right);
 
@@ -8856,11 +9135,51 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                         case OPCODE_MOD: res = fmod(left_val, right_val); break;
                         default: APE_ASSERT(false); break;
                     }
-                    res_obj = object_make_number(res);
+                    stack_push(vm, object_make_number(res));
                 } else if (left_type == OBJECT_STRING  && right_type == OBJECT_STRING && opcode == OPCODE_ADD) {
                     const char* right_val = object_get_string(right);
                     const char* left_val = object_get_string(left);
-                    res_obj = object_make_stringf(vm->mem, "%s%s", left_val, right_val);
+                    object_t res_obj = object_make_stringf(vm->mem, "%s%s", left_val, right_val);
+                    stack_push(vm, res_obj);
+                } else if (left_type == OBJECT_MAP || right_type == OBJECT_MAP) {
+                    const char *key_str = "";
+                    switch (opcode) {
+                        case OPCODE_ADD: key_str = "__operator_add"; break;
+                        case OPCODE_SUB: key_str = "__operator_sub"; break;
+                        case OPCODE_MUL: key_str = "__operator_mul"; break;
+                        case OPCODE_DIV: key_str = "__operator_div"; break;
+                        case OPCODE_MOD: key_str = "__operator_mod"; break;
+                        default: APE_ASSERT(false); break;
+                    }
+                    object_t key = object_make_string(vm->mem, key_str);
+                    object_t callee = object_make_null();
+                    if (left_type == OBJECT_MAP) {
+                        callee = object_get_map_value(left, key);
+                    }
+                    if (!object_is_callable(callee)) {
+                        if (right_type == OBJECT_MAP) {
+                            callee = object_get_map_value(left, key);
+                        }
+
+                        if (!object_is_callable(callee)) {
+                            const char *opcode_name = opcode_get_name(opcode);
+                            const char *left_type_name = object_get_type_name(left_type);
+                            const char *right_type_name = object_get_type_name(right_type);
+                            error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                                                       "Invalid operand types for %s, got %s and %s (no overloaded operator found)",
+                                                       opcode_name, left_type_name, right_type_name);
+                            ptrarray_add(vm->errors, err);
+                            goto end;
+                        }
+                    }
+
+                    stack_push(vm, callee);
+                    stack_push(vm, left);
+                    stack_push(vm, right);
+                    bool ok = call_object(vm, callee, 2);
+                    if (!ok) {
+                        goto end;
+                    }
                 } else {
                     const char *opcode_name = opcode_get_name(opcode);
                     const char *left_type_name = object_get_type_name(left_type);
@@ -8871,7 +9190,6 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     ptrarray_add(vm->errors, err);
                     goto end;
                 }
-                stack_push(vm, res_obj);
                 break;
             }
             case OPCODE_POP: {
@@ -8912,18 +9230,36 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
             {
                 object_t operand = stack_pop(vm);
                 object_type_t operand_type = object_get_type(operand);
-                const char *operand_type_string = object_get_type_name(operand_type);
-
-                if (operand_type != OBJECT_NUMBER) {
+                if (operand_type == OBJECT_NUMBER) {
+                    double val = object_get_number(operand);
+                    object_t res = object_make_number(-val);
+                    stack_push(vm, res);
+                } else if (operand_type == OBJECT_MAP) {
+                    const char *key_str = "__operator_minus";
+                    object_t key = object_make_string(vm->mem, key_str);
+                    object_t callee = object_get_map_value(operand, key);
+                    if (!object_is_callable(callee)) {
+                        const char *operand_type_string = object_get_type_name(operand_type);
+                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                                                   "Invalid operand types for - prefix, got %s (no overloaded operator found)",
+                                                   operand_type_string);
+                        ptrarray_add(vm->errors, err);
+                        goto end;
+                    }
+                    stack_push(vm, callee);
+                    stack_push(vm, operand);
+                    bool ok = call_object(vm, callee, 1);
+                    if (!ok) {
+                        goto end;
+                    }
+                } else {
+                    const char *operand_type_string = object_get_type_name(operand_type);
                     error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
-                                              "Invalid operand type for MINUS, got %s",
-                                              operand_type_string);
+                                               "Invalid operand type for MINUS, got %s",
+                                               operand_type_string);
                     ptrarray_add(vm->errors, err);
                     goto end;
                 }
-                double val = object_get_number(operand);
-                object_t res = object_make_number(-val);
-                stack_push(vm, res);
                 break;
             }
             case OPCODE_BANG: {
@@ -9097,40 +9433,14 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
             case OPCODE_CALL: {
                 uint8_t num_args = frame_read_uint8(vm->current_frame);
                 object_t callee = stack_get(vm, num_args);
-                object_type_t callee_type = object_get_type(callee);
-                if (callee_type == OBJECT_FUNCTION) {
-                    function_t *callee_function = object_get_function(callee);
-                    if (num_args != callee_function->num_args) {
-                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
-                                                  "Invalid number of arguments to \"%s\", expected %d, got %d",
-                                                  callee_function->name, callee_function->num_args, num_args);
-                        ptrarray_add(vm->errors, err);
-                        goto end;
-                    }
-                    frame_t callee_frame;
-                    frame_init(&callee_frame, callee, vm->sp - num_args);
-                    push_frame(vm, callee_frame);
-                    set_sp(vm, callee_frame.base_pointer + callee_function->num_locals);
-                } else if (callee_type == OBJECT_BUILTIN) {
-                    object_t *stack_pos = vm->stack + vm->sp - num_args;
-                    object_t res = call_builtin(vm, callee, frame_src_position(vm->current_frame), num_args, stack_pos);
-                    if (vm_has_errors(vm)) {
-                        goto end;
-                    }
-                    set_sp(vm, vm->sp - num_args - 1);
-                    stack_push(vm, res);
-                } else {
-                    const char *callee_type_name = object_get_type_name(callee_type);
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
-                                              "%s object is not callable", callee_type_name);
-                    ptrarray_add(vm->errors, err);
+                bool ok = call_object(vm, callee, num_args);
+                if (!ok) {
                     goto end;
                 }
                 break;
             }
             case OPCODE_RETURN_VALUE: {
                 object_t res = stack_pop(vm);
-                set_sp(vm, vm->current_frame->base_pointer - 1);
                 bool ok = pop_frame(vm);
                 if (!ok) {
                     goto end;
@@ -9139,12 +9449,12 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 break;
             }
             case OPCODE_RETURN: {
-                set_sp(vm, vm->current_frame->base_pointer - 1);
                 bool ok = pop_frame(vm);
+                stack_push(vm, object_make_null());
                 if (!ok) {
+                    stack_pop(vm);
                     goto end;
                 }
-                stack_push(vm, object_make_null());
                 break;
             }
             case OPCODE_SET_LOCAL: {
@@ -9335,23 +9645,14 @@ end:
             traceback_append_from_vm(err->traceback, vm);
         }
     }
-
-    while (array_count(vm->frames) > 0) {
-        pop_frame(vm);
-    }
-
-    if (ptrarray_count(vm->errors) == 0) {
-        APE_ASSERT(vm->sp == 0);
-    }
     
     run_gc(vm, constants);
 
-    vm->sp = 0;
     vm->running = false;
     return ptrarray_count(vm->errors) == 0;
 }
 
-object_t vm_last_popped(vm_t *vm) {
+object_t vm_get_last_popped(vm_t *vm) {
     return vm->last_popped;
 }
 
@@ -9453,9 +9754,12 @@ static object_t stack_get(vm_t *vm, int nth_item) {
 static void push_frame(vm_t *vm, frame_t frame) {
     array_push(vm->frames, &frame);
     vm->current_frame = array_top(vm->frames);
+    function_t *frame_function = object_get_function(frame.function);
+    set_sp(vm, frame.base_pointer + frame_function->num_locals);
 }
 
 static bool pop_frame(vm_t *vm) {
+    set_sp(vm, vm->current_frame->base_pointer - 1);
     array_pop(vm->frames, NULL);
     vm->current_frame = array_top(vm->frames);
     if (!vm->current_frame) {
@@ -9476,6 +9780,38 @@ static void run_gc(vm_t *vm, array(object_t) *constants) {
     gc_mark_objects(vm->stack, vm->sp);
     gc_mark_object(vm->last_popped);
     gc_sweep(vm->mem);
+}
+
+static bool call_object(vm_t *vm, object_t callee, int num_args) {
+    object_type_t callee_type = object_get_type(callee);
+    if (callee_type == OBJECT_FUNCTION) {
+        function_t *callee_function = object_get_function(callee);
+        if (num_args != callee_function->num_args) {
+            error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                                       "Invalid number of arguments to \"%s\", expected %d, got %d",
+                                       callee_function->name, callee_function->num_args, num_args);
+            ptrarray_add(vm->errors, err);
+
+        }
+        frame_t callee_frame;
+        frame_init(&callee_frame, callee, vm->sp - num_args);
+        push_frame(vm, callee_frame);
+    } else if (callee_type == OBJECT_BUILTIN) {
+        object_t *stack_pos = vm->stack + vm->sp - num_args;
+        object_t res = call_builtin(vm, callee, frame_src_position(vm->current_frame), num_args, stack_pos);
+        if (vm_has_errors(vm)) {
+            return false;
+        }
+        set_sp(vm, vm->sp - num_args - 1);
+        stack_push(vm, res);
+    } else {
+        const char *callee_type_name = object_get_type_name(callee_type);
+        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                                   "%s object is not callable", callee_type_name);
+        ptrarray_add(vm->errors, err);
+        return false;
+    }
+    return true;
 }
 
 static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args) {
@@ -9511,8 +9847,8 @@ static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int a
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 1
-#define APE_IMPL_VERSION_PATCH 2
+#define APE_IMPL_VERSION_MINOR 2
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
@@ -9532,11 +9868,11 @@ static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int a
 #include "traceback.h"
 #endif
 
-typedef struct external_fn_wrapper {
-    ape_external_fn fn;
+typedef struct builtin_fn_wrapper {
+    ape_builtin_fn fn;
     ape_t *ape;
     void *data;
-} external_fn_wrapper_t;
+} builtin_fn_wrapper_t;
 
 typedef struct ape_program {
     ape_t *ape;
@@ -9548,14 +9884,15 @@ typedef struct ape {
     compiler_t *compiler;
     vm_t *vm;
     ptrarray(ape_error_t) *errors;
-    ptrarray(external_fn_wrapper_t) *external_fn_wrappers;
+    ptrarray(builtin_fn_wrapper_t) *builtin_fn_wrappers;
     ape_config_t config;
 } ape_t;
 
-static object_t ape_external_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args);
+static object_t ape_builtin_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args);
 static object_t ape_object_to_object(ape_object_t obj);
 static ape_object_t object_to_ape_object(object_t obj);
 
+static void reset_state(ape_t *ape);
 static void set_default_config(ape_t *ape);
 static char* read_file_default(void *ctx, const char *filename);
 static size_t write_file_default(void* context, const char *path, const char *string, size_t string_size);
@@ -9599,8 +9936,8 @@ ape_t *ape_make(void) {
     if (!ape->vm) {
         goto err;
     }
-    ape->external_fn_wrappers = ptrarray_make();
-    if (!ape->external_fn_wrappers) {
+    ape->builtin_fn_wrappers = ptrarray_make();
+    if (!ape->builtin_fn_wrappers) {
         goto err;
     }
     return ape;
@@ -9616,7 +9953,7 @@ void ape_destroy(ape_t *ape) {
     if (!ape) {
         return;
     }
-    ptrarray_destroy_with_items(ape->external_fn_wrappers, ape_free);
+    ptrarray_destroy_with_items(ape->builtin_fn_wrappers, ape_free);
     ptrarray_destroy_with_items(ape->errors, error_destroy);
     vm_destroy(ape->vm);
     compiler_destroy(ape->compiler);
@@ -9688,8 +10025,8 @@ err:
 }
 
 ape_object_t ape_execute_program(ape_t *ape, const ape_program_t *program) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
-
+    reset_state(ape);
+ 
     if (ape != program->ape) {
         ape_add_errorf(ape, "ape program was compiled with a different ape instance");
         return ape_object_make_null();
@@ -9702,7 +10039,7 @@ ape_object_t ape_execute_program(ape_t *ape, const ape_program_t *program) {
 
     APE_ASSERT(ape->vm->sp == 0);
 
-    object_t res = vm_last_popped(ape->vm);
+    object_t res = vm_get_last_popped(ape->vm);
     if (object_get_type(res) == OBJECT_NONE) {
         return ape_object_make_null();
     }
@@ -9719,7 +10056,7 @@ void ape_program_destroy(ape_program_t *program) {
 }
 
 ape_object_t ape_execute(ape_t *ape, const char *code) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    reset_state(ape);
 
     compilation_result_t *comp_res = NULL;
 
@@ -9735,7 +10072,7 @@ ape_object_t ape_execute(ape_t *ape, const char *code) {
 
     APE_ASSERT(ape->vm->sp == 0);
 
-    object_t res = vm_last_popped(ape->vm);
+    object_t res = vm_get_last_popped(ape->vm);
     if (object_get_type(res) == OBJECT_NONE) {
         goto err;
     }
@@ -9750,7 +10087,7 @@ err:
 }
 
 ape_object_t ape_execute_file(ape_t *ape, const char *path) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    reset_state(ape);
 
     compilation_result_t *comp_res = NULL;
 
@@ -9766,7 +10103,7 @@ ape_object_t ape_execute_file(ape_t *ape, const char *path) {
 
     APE_ASSERT(ape->vm->sp == 0);
 
-    object_t res = vm_last_popped(ape->vm);
+    object_t res = vm_get_last_popped(ape->vm);
     if (object_get_type(res) == OBJECT_NONE) {
         goto err;
     }
@@ -9781,7 +10118,7 @@ err:
 }
 
 ape_object_t ape_call(ape_t *ape, const char *function_name, int argc, ape_object_t *args) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    reset_state(ape);
 
     object_t callee = ape_object_to_object(ape_get_object(ape, function_name));
     if (object_get_type(callee) == OBJECT_NULL) {
@@ -9806,18 +10143,18 @@ const ape_error_t* ape_get_error(const ape_t *ape, int index) {
     return ptrarray_get(ape->errors, index);
 }
 
-bool ape_set_external_function(ape_t *ape, const char *name, ape_external_fn fn, void *data) {
-    external_fn_wrapper_t *wrapper = ape_malloc(sizeof(external_fn_wrapper_t));
-    memset(wrapper, 0, sizeof(external_fn_wrapper_t));
+bool ape_set_builtin(ape_t *ape, const char *name, ape_builtin_fn fn, void *data) {
+    builtin_fn_wrapper_t *wrapper = ape_malloc(sizeof(builtin_fn_wrapper_t));
+    memset(wrapper, 0, sizeof(builtin_fn_wrapper_t));
     wrapper->fn = fn;
     wrapper->ape = ape;
     wrapper->data = data;
-    object_t wrapper_builtin = object_make_builtin(ape->mem, name, ape_external_fn_wrapper, wrapper);
+    object_t wrapper_builtin = object_make_builtin(ape->mem, name, ape_builtin_fn_wrapper, wrapper);
     int ix = array_count(ape->vm->builtins);
     array_add(ape->vm->builtins, &wrapper_builtin);
     symbol_table_t *symbol_table = compiler_get_symbol_table(ape->compiler);
     symbol_table_define_builtin(symbol_table, name, ix);
-    ptrarray_add(ape->external_fn_wrappers, wrapper);
+    ptrarray_add(ape->builtin_fn_wrappers, wrapper);
     return true;
 }
 
@@ -9924,6 +10261,17 @@ ape_object_t ape_object_make_map(ape_t *ape) {
     return object_to_ape_object(object_make_map(ape->mem));
 }
 
+ape_object_t ape_object_make_builtin(ape_t *ape, ape_builtin_fn fn, void *data) {
+    builtin_fn_wrapper_t *wrapper = ape_malloc(sizeof(builtin_fn_wrapper_t));
+    memset(wrapper, 0, sizeof(builtin_fn_wrapper_t));
+    wrapper->fn = fn;
+    wrapper->ape = ape;
+    wrapper->data = data;
+    object_t wrapper_builtin = object_make_builtin(ape->mem, "", ape_builtin_fn_wrapper, wrapper);
+    ptrarray_add(ape->builtin_fn_wrappers, wrapper);
+    return object_to_ape_object(wrapper_builtin);
+}
+
 ape_object_t ape_object_make_error(ape_t *ape, const char *msg) {
     return object_to_ape_object(object_make_error(ape->mem, msg));
 }
@@ -9949,6 +10297,36 @@ ape_object_t ape_object_make_external(ape_t *ape, void *data) {
 
 char *ape_object_serialize(ape_object_t obj) {
     return object_serialize(ape_object_to_object(obj));
+}
+
+void ape_object_disable_gc(ape_object_t ape_obj) {
+    object_t obj = ape_object_to_object(ape_obj);
+    gc_disable_on_object(obj);
+}
+
+void ape_object_enable_gc(ape_object_t ape_obj) {
+    object_t obj = ape_object_to_object(ape_obj);
+    gc_enable_on_object(obj);
+}
+
+bool ape_object_equals(ape_object_t ape_a, ape_object_t ape_b){
+    object_t a = ape_object_to_object(ape_a);
+    object_t b = ape_object_to_object(ape_b);
+    return object_equals(a, b);
+}
+
+ape_object_t ape_object_copy(ape_object_t ape_obj) {
+    object_t obj = ape_object_to_object(ape_obj);
+    gcmem_t *mem = object_get_mem(obj);
+    object_t res = object_copy(mem, obj);
+    return object_to_ape_object(res);
+}
+
+ape_object_t ape_object_deep_copy(ape_object_t ape_obj) {
+    object_t obj = ape_object_to_object(ape_obj);
+    gcmem_t *mem = object_get_mem(obj);
+    object_t res = object_deep_copy(mem, obj);
+    return object_to_ape_object(res);
 }
 
 void ape_add_error(ape_t *ape, const char *message) {
@@ -9985,6 +10363,7 @@ ape_object_type_t ape_object_get_type(ape_object_t ape_obj) {
         case OBJECT_MAP:       return APE_OBJECT_MAP;
         case OBJECT_FUNCTION:  return APE_OBJECT_FUNCTION;
         case OBJECT_EXTERNAL:  return APE_OBJECT_EXTERNAL;
+        case OBJECT_FREED:     return APE_OBJECT_FREED;
         case OBJECT_ANY:       return APE_OBJECT_ANY;
         default:               return APE_OBJECT_NONE;
     }
@@ -10007,6 +10386,7 @@ const char* ape_object_get_type_name(ape_object_type_t type) {
         case APE_OBJECT_MAP:       return "MAP";
         case APE_OBJECT_FUNCTION:  return "FUNCTION";
         case APE_OBJECT_EXTERNAL:  return "EXTERNAL";
+        case APE_OBJECT_FREED:     return "FREED";
         case APE_OBJECT_ANY:       return "ANY";
         default:                   return "NONE";
     }
@@ -10136,67 +10516,86 @@ int ape_object_get_map_length(ape_object_t obj) {
     return object_get_map_length(ape_object_to_object(obj));
 }
 
-ape_object_t ape_object_get_map_key_at(ape_object_t obj, int ix) {
-    return object_to_ape_object(object_get_map_key_at(ape_object_to_object(obj), ix));
+ape_object_t ape_object_get_map_key_at(ape_object_t ape_obj, int ix) {
+    object_t obj = ape_object_to_object(ape_obj);
+    return object_to_ape_object(object_get_map_key_at(obj, ix));
 }
 
-ape_object_t ape_object_get_map_value_at(ape_object_t obj, int ix) {
-    return object_to_ape_object(object_get_map_value_at(ape_object_to_object(obj), ix));
+ape_object_t ape_object_get_map_value_at(ape_object_t ape_obj, int ix) {
+    object_t obj = ape_object_to_object(ape_obj);
+    object_t res = object_get_map_value_at(obj, ix);
+    return object_to_ape_object(res);
 }
 
-bool ape_object_set_map_value(ape_object_t obj, ape_object_t key, ape_object_t val) {
+bool ape_object_set_map_value_at(ape_object_t ape_obj, int ix, ape_object_t ape_val) {
+    object_t obj = ape_object_to_object(ape_obj);
+    object_t val = ape_object_to_object(ape_val);
+    return object_set_map_value_at(obj, ix, val);
+}
+
+bool ape_object_set_map_value_with_value_key(ape_object_t obj, ape_object_t key, ape_object_t val) {
     return object_set_map_value(ape_object_to_object(obj), ape_object_to_object(key), ape_object_to_object(val));
 }
 
-bool ape_object_set_map_value_with_string_key(ape_object_t obj, const char *key, ape_object_t value) {
+bool ape_object_set_map_value(ape_object_t obj, const char *key, ape_object_t value) {
     gcmem_t *mem = object_get_mem(ape_object_to_object(obj));
     object_t key_object = object_make_string(mem, key);
-    return ape_object_set_map_value(obj, object_to_ape_object(key_object), value);
+    return ape_object_set_map_value_with_value_key(obj, object_to_ape_object(key_object), value);
 }
 
-bool ape_object_set_map_string_with_string_key(ape_object_t obj, const char *key, const char *string) {
+bool ape_object_set_map_string(ape_object_t obj, const char *key, const char *string) {
     gcmem_t *mem = object_get_mem(ape_object_to_object(obj));
     object_t string_object = object_make_string(mem, string);
-    return ape_object_set_map_value_with_string_key(obj, key, object_to_ape_object(string_object));
+    return ape_object_set_map_value(obj, key, object_to_ape_object(string_object));
 }
 
-bool ape_object_set_map_number_with_string_key(ape_object_t obj, const char *key, double number) {
+bool ape_object_set_map_number(ape_object_t obj, const char *key, double number) {
     object_t number_object = object_make_number(number);
-    return ape_object_set_map_value_with_string_key(obj, key, object_to_ape_object(number_object));
+    return ape_object_set_map_value(obj, key, object_to_ape_object(number_object));
 }
 
-bool ape_object_set_map_bool_with_string_key(ape_object_t obj, const char *key, bool value) {
+bool ape_object_set_map_bool(ape_object_t obj, const char *key, bool value) {
     object_t bool_object = object_make_bool(value);
-    return ape_object_set_map_value_with_string_key(obj, key, object_to_ape_object(bool_object));
+    return ape_object_set_map_value(obj, key, object_to_ape_object(bool_object));
 }
 
-ape_object_t ape_object_get_map_value(ape_object_t obj, ape_object_t key) {
+ape_object_t ape_object_get_map_value_with_value_key(ape_object_t obj, ape_object_t key) {
     return object_to_ape_object(object_get_map_value(ape_object_to_object(obj), ape_object_to_object(key)));
 }
 
-ape_object_t ape_object_get_map_value_with_string_key(ape_object_t object, const char *key) {
+ape_object_t ape_object_get_map_value(ape_object_t object, const char *key) {
     gcmem_t *mem = object_get_mem(ape_object_to_object(object));
     if (!mem) {
         return ape_object_make_null();
     }
     object_t key_object = object_make_string(mem, key);
-    ape_object_t res = ape_object_get_map_value(object, object_to_ape_object(key_object));
+    ape_object_t res = ape_object_get_map_value_with_value_key(object, object_to_ape_object(key_object));
     return res;
 }
 
-const char* ape_object_get_map_string_with_string_key(ape_object_t object, const char *key) {
-    ape_object_t res = ape_object_get_map_value_with_string_key(object, key);
+const char* ape_object_get_map_string(ape_object_t object, const char *key) {
+    ape_object_t res = ape_object_get_map_value(object, key);
     return ape_object_get_string(res);
 }
 
-double ape_object_get_map_number_with_string_key(ape_object_t object, const char *key) {
-    ape_object_t res = ape_object_get_map_value_with_string_key(object, key);
+double ape_object_get_map_number(ape_object_t object, const char *key) {
+    ape_object_t res = ape_object_get_map_value(object, key);
     return ape_object_get_number(res);
 }
 
-bool ape_object_get_map_bool_with_string_key(ape_object_t object, const char *key) {
-    ape_object_t res = ape_object_get_map_value_with_string_key(object, key);
+bool ape_object_get_map_bool(ape_object_t object, const char *key) {
+    ape_object_t res = ape_object_get_map_value(object, key);
     return ape_object_get_bool(res);
+}
+
+bool ape_object_map_has_key(ape_object_t ape_object, const char *key) {
+    object_t object = ape_object_to_object(ape_object);
+    gcmem_t *mem = object_get_mem(object);
+    if (!mem) {
+        return false;
+    }
+    object_t key_object = object_make_string(mem, key);
+    return object_map_has_key(object, key_object);
 }
 
 //-----------------------------------------------------------------------------
@@ -10208,12 +10607,12 @@ const char* ape_error_get_message(const ape_error_t *ape_error) {
     return error->message;
 }
 
-const char* ape_error_get_filename(const ape_error_t *ape_error) {
+const char* ape_error_get_filepath(const ape_error_t *ape_error) {
     const error_t *error = (const error_t*)ape_error;
     if (!error->pos.file) {
         return NULL;
     }
-    return error->pos.file->name;
+    return error->pos.file->path;
 }
 
 const char* ape_error_get_line(const ape_error_t *ape_error) {
@@ -10267,7 +10666,7 @@ const char* ape_error_type_to_string(ape_error_type_t type) {
 
 char* ape_error_serialize(const ape_error_t *err) {
     const char *type_str = ape_error_get_type_string(err);
-    const char *filename = ape_error_get_filename(err);
+    const char *filename = ape_error_get_filepath(err);
     const char *line = ape_error_get_line(err);
     int line_num = ape_error_get_line_number(err);
     int col_num = ape_error_get_column_number(err);
@@ -10306,13 +10705,13 @@ int ape_traceback_get_depth(const ape_traceback_t *ape_traceback) {
     return array_count(traceback->items);
 }
 
-const char* ape_traceback_get_filename(const ape_traceback_t *ape_traceback, int depth) {
+const char* ape_traceback_get_filepath(const ape_traceback_t *ape_traceback, int depth) {
     const traceback_t *traceback = (const traceback_t*)ape_traceback;
     traceback_item_t *item = array_get(traceback->items, depth);
     if (!item) {
         return NULL;
     }
-    return traceback_item_get_filename(item);
+    return traceback_item_get_filepath(item);
 }
 
 const char* ape_traceback_get_line(const ape_traceback_t *ape_traceback, int depth) {
@@ -10355,8 +10754,8 @@ const char* ape_traceback_get_function_name(const ape_traceback_t *ape_traceback
 // Ape internal
 //-----------------------------------------------------------------------------
 
-static object_t ape_external_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args) {
-    external_fn_wrapper_t *wrapper = (external_fn_wrapper_t*)data;
+static object_t ape_builtin_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args) {
+    builtin_fn_wrapper_t *wrapper = (builtin_fn_wrapper_t*)data;
     APE_ASSERT(vm == wrapper->ape->vm);
     ape_object_t res = wrapper->fn(wrapper->ape, wrapper->data, argc, (ape_object_t*)args);
     if (ape_has_errors(wrapper->ape)) {
@@ -10371,6 +10770,11 @@ static object_t ape_object_to_object(ape_object_t obj) {
 
 static ape_object_t object_to_ape_object(object_t obj) {
     return (ape_object_t){ ._internal = obj.handle };
+}
+
+static void reset_state(ape_t *ape) {
+    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    vm_reset(ape->vm);
 }
 
 static void set_default_config(ape_t *ape) {

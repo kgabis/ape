@@ -11,7 +11,7 @@ fn traceback() {
         return b();
     }
 
-    a();
+    return a();
 }
 
 fn traceback_builtin() {
@@ -27,7 +27,7 @@ fn traceback_builtin() {
         b();
     }
 
-    a();
+    return a();
 }
 
 
@@ -44,5 +44,5 @@ fn traceback_builtin_error() {
         return b();
     }
 
-    a();
+    return a();
 }

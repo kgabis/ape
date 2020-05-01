@@ -9,7 +9,7 @@ echo "Splitting and copying files"
 ../utils/split.py --input ../ape.c --output-path ${dir}
 cp ../ape.h ${dir}
 
-cp *.c *h files/*.bn ${dir}
+cp -r *.c *h files/ ${dir}
 echo "    OK"
 
 cd ${dir}

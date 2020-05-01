@@ -83,7 +83,7 @@ static ptrarray(statement_t)* parse(const char *code) {
     ptrarray(statement_t)* statements = parser_parse_all(parser, code, NULL);
 
     if (!statements || ptrarray_count(parser->errors) > 0) {
-        print_errors(parser->errors, code);
+        print_errors(parser->errors);
         assert(false);
     }
 

@@ -4,7 +4,7 @@
 #include "collections.h"
 #include "error.h"
 
-void print_errors(ptrarray(error_t) *errors, const char *code);
+void print_errors(ptrarray(error_t) *errors);
 ptrarray(char)* get_lines(const char *code);
 
 #ifdef APE_TESTS_MAIN

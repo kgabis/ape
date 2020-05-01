@@ -24,7 +24,7 @@ void repl_start() {
 
     ape_set_repl_mode(ape, true);
 
-    ape_set_external_function(ape, "exit", exit_repl, &exit);
+    ape_set_builtin(ape, "exit", exit_repl, &exit);
     ape_set_global_constant(ape, "test", ape_object_make_number(123));
 
     while (!exit) {

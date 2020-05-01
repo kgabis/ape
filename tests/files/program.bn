@@ -4,7 +4,6 @@ assert(squared[1] == 4)
 assert(squared[2] == 9)
 
 import "module_a"
-import "module_a" // double import should work
 
 assert(module_a::add(2, 2) == 4)
 
@@ -133,3 +132,38 @@ const big_array = array(1000)
 assert(len(big_array) == 1000)
 
 fn return_no_semicolon() { return }
+
+// operator overloading test
+fn vec2(x, y) {
+    return {
+        x: x,
+        y: y,
+        __operator_add: vec2_add,
+        __operator_sub: vec2_sub,
+        __operator_minus: fn(a) { return vec2(-a.x, -a.y) },
+        __operator_mul: fn(a, b) {
+            if (is_number(a)) {
+                return vec2(b.x * a, b.y * a)
+            } else if (is_number(b)) {
+                return vec2(a.x * b, a.y * b)
+            } else {
+                return vec2(a.x * b.x, a.y * b.y)
+            }
+        },
+    }
+}
+
+const va = vec2(1, 2)
+const vb = vec2(3, 4)
+
+var v = va + vb
+assert(v.x == 4)
+assert(v.y == 6)
+
+v = va * 2
+assert(v.x == 2)
+assert(v.y == 4)
+
+v = -va
+assert(v.x == -1)
+assert(v.y == -2)

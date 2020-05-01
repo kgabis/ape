@@ -80,7 +80,7 @@ static object_t execute(const char *input, bool must_succeed) {
 
     compilation_result_t *comp_res = compiler_compile(comp, input);
     if (!comp_res || ptrarray_count(comp->errors) > 0) {
-        print_errors(comp->errors, input);
+        print_errors(comp->errors);
         assert(false); // can only fail on vm_run
     }
 
@@ -92,7 +92,7 @@ static object_t execute(const char *input, bool must_succeed) {
         if (!must_succeed) {
             return object_make_null();
         }
-        print_errors(vm->errors, input);
+        print_errors(vm->errors);
         assert(false);
     }
 
@@ -100,7 +100,7 @@ static object_t execute(const char *input, bool must_succeed) {
         assert(false);
     }
 
-    object_t top = vm_last_popped(vm);
+    object_t top = vm_get_last_popped(vm);
 
     return top;
 }
@@ -1037,13 +1037,12 @@ static void test_errors() {
 
         compilation_result_t *comp_res = compiler_compile(comp, test.input);
         if (!comp_res || ptrarray_count(comp->errors) > 0) {
-            print_errors(comp->errors, test.input);
+            print_errors(comp->errors);
             assert(false); // can only fail on vm_run
         }
 
         vm_t *vm = vm_make(NULL, mem, ptrarray_make());
         ok = vm_run(vm, comp_res, comp->constants);
-        assert(vm->sp == 0);
 
         assert(!ok);
         assert(ptrarray_count(vm->errors) == 1);

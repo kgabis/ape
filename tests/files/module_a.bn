@@ -1,4 +1,6 @@
-import "module_c"
+import "module_b"
+
+import "module_dir/module_c"
 
 assert(true) // testing if builtins are resolvable
 

@@ -12,6 +12,8 @@
 #include "test_symbol_table.h"
 #include "test_api.h"
 
+#include "compiler.h"
+
 #ifdef APE_TESTS_MAIN
 int main() {
 #else
@@ -29,32 +31,29 @@ int tests_main() {
     return 0;
 }
 
-void print_errors(ptrarray(error_t) *errors, const char *code) {
+void print_errors(ptrarray(error_t) *errors) {
     int count = ptrarray_count(errors);
-    ptrarray(char)* lines = get_lines(code);
     for (int i = 0; i < count; i++) {
         const error_t *err = ptrarray_get(errors, i);
-        int line = err->pos.line;
-        int col = err->pos.column;
+        int line_num = err->pos.line;
+        int col_num = err->pos.column;
         error_type_t type = err->type;
         const char *type_str = error_type_to_string(err->type);
-        if (line >= 0) {
-            const char *line_str = ptrarray_get(lines, line);
+        if (line_num >= 0) {
+            const char *line_str = ptrarray_get(err->pos.file->lines, line_num);
             puts(line_str);
         }
         if (type == ERROR_RUNTIME) {
             printf("%s ERROR: %s\n", type_str, err->message);
         } else {
-            for (int j = 0; j < col; j++) {
+            for (int j = 0; j < col_num; j++) {
                 printf(" ");
             }
             printf("^\n");
             printf("%s ERROR on %d:%d: %s\n", type_str,
-                   line, col, err->message);
+                   line_num, col_num, err->message);
         }
     }
-
-    ptrarray_destroy_with_items(lines, free);
 }
 
 ptrarray(char)* get_lines(const char *code) {

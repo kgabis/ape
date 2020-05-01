@@ -1,0 +1,6 @@
+var counter = 0
+
+fn inc() {
+    counter += 1
+    return counter
+}

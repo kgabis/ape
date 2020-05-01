@@ -1,0 +1,5 @@
+import "module_b"
+
+fn inc() {
+    return module_b::inc()
+}

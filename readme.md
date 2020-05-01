@@ -1,7 +1,7 @@
 # The Ape Programming Language
 
 ## About
-Ape is an easy to use programming language and library written in C. It's an offspring of [Monkey](https://monkeylang.org) language (from [Writing An Interpreter In Go](https://interpreterbook.com) and [Writing A Compiler In Go](https://compilerbook.com) books by [Thorsten Ball](https://thorstenball.com)), but it evolved to be more procedural with variables, loops, and more.
+Ape is an easy to use programming language and library written in C. It's an offspring of [Monkey](https://monkeylang.org) language (from [Writing An Interpreter In Go](https://interpreterbook.com) and [Writing A Compiler In Go](https://compilerbook.com) books by [Thorsten Ball](https://thorstenball.com)), but it evolved to be more procedural with variables, loops, operator overloading, modules, and more.
 
 ## Current state
 It's under development so everything in the language and the api might change.
@@ -149,9 +149,37 @@ if (is_error(err)) {
 
 ### Modules
 ```
-import "foo" // imports "foo.bn" and load global symbols prefixed with foo::
+import "foo" // import "foo.bn" and load global symbols prefixed with foo::
 
 foo::bar()
+
+import "bar/baz" // import "bar/baz.bn" and load global symbols prefixed with baz::
+baz::foo()
+```
+
+### Operator overloading
+Only available for infix operators ```+ - * / %``` and prefix operator ```-```.
+
+```
+fn vec2(x, y) {
+    return {
+        x: x,
+        y: y,
+        __operator_add: fn(a, b) { return vec2(a.x + b.x, a.y + b.y)},
+        __operator_sub: fn(a, b) { return vec2(a.x - b.x, a.y - b.y)},
+        __operator_minus: fn(a) { return vec2(-a.x, -a.y) },
+        __operator_mul: fn(a, b) {
+            if (is_number(a)) {
+                return vec2(b.x * a, b.y * a)
+            } else if (is_number(b)) {
+                return vec2(a.x * b, a.y * b)
+            } else {
+                return vec2(a.x * b.x, a.y * b.y)
+            }
+        },
+        // similar for __operator_div and __operator_mod
+    }
+}
 ```
 
 ## Splitting and joining
