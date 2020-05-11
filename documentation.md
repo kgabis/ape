@@ -1,42 +1,14 @@
 # Ape Documentation
 
+<p><b>APE IS UNDER ACTIVE DEVELOPMENT SO EVERYTHING HERE CAN BE WRONG OR OUT OF DATE.<br/>
+IF IN DOUBT, CHECK THE SOURCE CODE.</b></p>
+
 ### [Table of Contents](#)
 
-1. [Built-ins](#built-ins)<br/>
-  [1.1 Comments](#built-ins_comments)<br/>
-  [1.2 Functions](#built-ins_functions)<br/>
-  []()<br/>
+[1. Builtins](#builtins)<br/>
 
-
-<br/>
-<br/>
-<br/>
-<br/>
-
-<a id="built-ins_comments"></a>
-
-### <p class="subheading">Comments</p>
-
-<p class="text">
-  Comments are single-line C-style
-</p>
-
-```
-var a = 1 // created variable
-//var b = 2 // variable not created
-```
-
-<br/>
-
-
-<a id="built-ins_functions"></a>
-
-### <p class="subheading">Functions</p>
-
-<p class="text">
-  <li>A variable inside of a function cannot have the same name as the function.</li>
-  <li>If a function does not receive correct input, it will return <code>null</code>.</li>
-</p>
+<a id="builtins"></a>
+### 1. Builtins
 
 `len(string | array | map)` -> `number`
 ```javascript
@@ -321,6 +293,3 @@ var a = 1 // created variable
 
 `abs(number)` -> `number`
 <br/>
-
-<br/>
-
