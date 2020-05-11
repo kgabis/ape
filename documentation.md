@@ -163,7 +163,7 @@ var a = 1 // created variable
   var aStep = 2
 
   range(aEnd) // [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-  range(aStart, aEnd) // [1, 2, 3, 4, 5, 6, 7, 8, 9]
+  range(aStart, aEnd) // [2, 3, 4, 5, 6, 7, 8, 9]
   range(aStart, aEnd, aStep) // [2, 4, 6, 8]
 ```
 <br/>
@@ -287,6 +287,7 @@ var a = 1 // created variable
 
 `is_error(object)` -> `bool`
 <br/>
+
 
 #### Math
 ---
