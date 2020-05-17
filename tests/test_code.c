@@ -61,7 +61,7 @@ static void test_instr_strings() {
     code_make(OPCODE_CONSTANT, 1, (uint64_t[]){0x2}, code);
     code_make(OPCODE_CONSTANT, 1, (uint64_t[]){0xffff}, code);
     code_make(OPCODE_FUNCTION, 2, (uint64_t[]){0xffff, 0xff}, code);
-    code_make(OPCODE_NUMBER, 1, (uint64_t[]){0x79abcdef}, code);
+    code_make(OPCODE_NUMBER, 1, (uint64_t[]){0x3ff3333333333333}, code);
 
     const char *expected = "\
 0000 ADD\n\
@@ -69,7 +69,7 @@ static void test_instr_strings() {
 0003 CONSTANT 2\n\
 0006 CONSTANT 65535\n\
 0009 FUNCTION 65535 255\n\
-0013 NUMBER 2041302511\n\
+0013 NUMBER 1.2\n\
 ";
 
     strbuf_t *buf = strbuf_make();

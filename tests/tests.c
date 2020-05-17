@@ -39,7 +39,7 @@ void print_errors(ptrarray(error_t) *errors) {
         int col_num = err->pos.column;
         error_type_t type = err->type;
         const char *type_str = error_type_to_string(err->type);
-        if (line_num >= 0) {
+        if (line_num >= 0 && err->pos.file && line_num < ptrarray_count(err->pos.file->lines)) {
             const char *line_str = ptrarray_get(err->pos.file->lines, line_num);
             puts(line_str);
         }

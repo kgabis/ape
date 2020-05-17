@@ -35,6 +35,12 @@ static void test_lexing() {
     -=\
     /=\
     *=\
+    %=\
+    &=\
+    |=\
+    ^=\
+    <<=\
+    >>=\
     const result = add(five, ten);\
     !-/*%5;\
     5 < 10 > 5 <= >=;\
@@ -57,6 +63,10 @@ static void test_lexing() {
     for (item in foo) { }\
     for\
     continue\
+    recover\
+    ^\
+    <<\
+    >>\
     ";
 
     token_t expected_tokens[] = {
@@ -96,6 +106,12 @@ static void test_lexing() {
         {TOKEN_MINUS_ASSIGN, "-="},
         {TOKEN_SLASH_ASSIGN, "/="},
         {TOKEN_ASTERISK_ASSIGN, "*="},
+        {TOKEN_PERCENT_ASSIGN, "%="},
+        {TOKEN_BIT_AND_ASSIGN, "&="},
+        {TOKEN_BIT_OR_ASSIGN, "|="},
+        {TOKEN_BIT_XOR_ASSIGN, "^="},
+        {TOKEN_LSHIFT_ASSIGN, "<<="},
+        {TOKEN_RSHIFT_ASSIGN, ">>="},
         {TOKEN_CONST, "const"},
         {TOKEN_IDENT, "result"},
         {TOKEN_ASSIGN, "="},
@@ -187,6 +203,10 @@ static void test_lexing() {
         {TOKEN_RBRACE, "}"},
         {TOKEN_FOR, "for"},
         {TOKEN_CONTINUE, "continue"},
+        {TOKEN_RECOVER, "recover"},
+        {TOKEN_BIT_XOR, "^"},
+        {TOKEN_LSHIFT, "<<"},
+        {TOKEN_RSHIFT, ">>"},
         {TOKEN_EOF, "EOF"},
     };
 

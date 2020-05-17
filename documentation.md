@@ -5,10 +5,48 @@ IF IN DOUBT, CHECK THE SOURCE CODE.</b></p>
 
 ### [Table of Contents](#)
 
-[1. Builtins](#builtins)<br/>
+[1. Error handling](#error-handling)<br/>
+[2. Builtins](#builtins)<br/>
+
+<a id="error-handling"></a>
+### 1. Error handling
+
+During program execution runtime errors can occur (for instance if wrong number of arguments is passed to a function). They can be handled with ```recover``` statement that works similar to ```catch``` statement in other languages with few important differences:
+* It needs to be declard <b>before</b> a runtime error it handles might occur
+* It cannot be nested
+* It's only valid within functions and <b>must</b> end with a return statement
+
+For instance, let's say there's a function ```foo()``` that calls ```bar()``` and then ```baz()```.
+
+```javascript
+fn foo() {
+    recover (e) { // e is a runtime error wrapped in error
+        println(e)
+        return 0
+    }
+    bar() // if it fails foo() will return 0
+
+    recover (e) {
+        println(e)
+        return 1
+    }
+    baz() // if it fails foo() will return 1
+
+    return 2
+}
+```
+
+Runtime crashes can be caused by calling ```crash("msg")``` function, however, if it's something expected that can be handled by caller, it's better to return an ```error``` value.
+
+```javascript
+const err = error("something bad happened")
+if (is_error(err)) {
+    println(err)
+}
+```
 
 <a id="builtins"></a>
-### 1. Builtins
+### 2. Builtins
 
 `len(string | array | map)` -> `number`
 ```javascript
@@ -271,7 +309,6 @@ IF IN DOUBT, CHECK THE SOURCE CODE.</b></p>
 ```javascript
   pow(2, 2) // 4
 ```
-<br/>
 
 `sin(number)` -> `number`
 <br/>
@@ -293,3 +330,4 @@ IF IN DOUBT, CHECK THE SOURCE CODE.</b></p>
 
 `abs(number)` -> `number`
 <br/>
+

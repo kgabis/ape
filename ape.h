@@ -44,10 +44,10 @@ extern "C"
 #endif
 
 #define APE_VERSION_MAJOR 0
-#define APE_VERSION_MINOR 2
+#define APE_VERSION_MINOR 3
 #define APE_VERSION_PATCH 0
 
-#define APE_VERSION_STRING "0.2.0"
+#define APE_VERSION_STRING "0.3.0"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
@@ -123,8 +123,8 @@ ape_object_t  ape_call(ape_t *ape, const char *function_name, int argc, ape_obje
         sizeof((ape_object_t[]){__VA_ARGS__}) / sizeof(ape_object_t),\
         (ape_object_t[]){__VA_ARGS__})
 
-void ape_add_error(ape_t *ape, const char *message);
-void ape_add_errorf(ape_t *ape, const char *format, ...) __attribute__ ((format (printf, 2, 3)));
+void ape_set_runtime_error(ape_t *ape, const char *message);
+void ape_set_runtime_errorf(ape_t *ape, const char *format, ...) __attribute__ ((format (printf, 2, 3)));
 bool ape_has_errors(const ape_t *ape);
 int  ape_errors_count(const ape_t *ape);
 const ape_error_t* ape_get_error(const ape_t *ape, int index);
@@ -133,11 +133,11 @@ bool ape_set_builtin(ape_t *ape, const char *name, ape_builtin_fn fn, void *data
 bool ape_set_global_constant(ape_t *ape, const char *name, ape_object_t obj);
 ape_object_t ape_get_object(ape_t *ape, const char *name);
 
-bool ape_check_args(ape_t *ape, bool generate_errors, int argc, ape_object_t *args, int expected_argc, int *expected_types);
-#define APE_CHECK_ARGS(ape, generate_errors, argc, args, ...)\
+bool ape_check_args(ape_t *ape, bool generate_error, int argc, ape_object_t *args, int expected_argc, int *expected_types);
+#define APE_CHECK_ARGS(ape, generate_error, argc, args, ...)\
     ape_check_args(\
         (ape),\
-        (generate_errors),\
+        (generate_error),\
         (argc),\
         (args),\
         sizeof((int[]){__VA_ARGS__}) / sizeof(int),\

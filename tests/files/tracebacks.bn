@@ -1,6 +1,6 @@
 fn traceback() {
     fn c() {
-        return 1/0;
+        return crash();
     }
 
     fn b() {

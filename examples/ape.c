@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < count; i++) {
             const ape_error_t *err = ape_get_error(ape, i);
             char *err_str = ape_error_serialize(err);
-            puts(err_str);
+            fprintf(stderr, "%s", err_str);
             free(err_str);
         }
     }

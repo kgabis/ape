@@ -44,6 +44,7 @@ static void test_while_loop(void);
 static void test_foreach_loop(void);
 static void test_for_loop(void);
 static void test_logical_expressions(void);
+static void test_recover_statement(void);
 
 void parser_test() {
     puts("### Parser test");
@@ -72,6 +73,7 @@ void parser_test() {
     test_foreach_loop();
     test_for_loop();
     test_logical_expressions();
+    test_recover_statement();
 }
 
 // INTERNAL
@@ -132,7 +134,7 @@ static void test_define_statements() {
 
         define_statement_t *def_stmt = &stmt->define;
 
-        assert(APE_STREQ(def_stmt->name, test.expected_ident));
+        assert(APE_STREQ(def_stmt->name.value, test.expected_ident));
         assert(def_stmt->assignable == test.assignable);
 
         strbuf_t *buf = strbuf_make();
@@ -167,8 +169,8 @@ return\
 static void test_string() {
     ptrarray(statement_t)* statements = ptrarray_make();
 
-    expression_t *expr = expression_make_ident(strdup("anotherVar"));
-    statement_t *stmt = statement_make_define(strdup("myVar"), expr, false);
+    expression_t *expr = expression_make_ident((ident_t){ .value = strdup("anotherVar")});
+    statement_t *stmt = statement_make_define((ident_t){ .value = strdup("myVar")}, expr, false);
 
     ptrarray_add(statements, stmt);
 
@@ -190,7 +192,7 @@ static void test_identifier_expression() {
     statement_t *stmt = ptrarray_get(statements, 0);
     assert(stmt->type == STATEMENT_EXPRESSION);
     assert(stmt->expression->type == EXPRESSION_IDENT);
-    assert(APE_STREQ(stmt->expression->ident.name, "foobar"));
+    assert(APE_STREQ(stmt->expression->ident.value, "foobar"));
 }
 
 static void test_number_literal_expressions() {
@@ -573,10 +575,10 @@ static void test_fn_literal_parsing() {
 
     assert(array_count(fn->params) == 2);
     ident_t *id_x = array_get(fn->params, 0);
-    assert(APE_STREQ(id_x->name, "x"));
+    assert(APE_STREQ(id_x->value, "x"));
 
     ident_t *id_y = array_get(fn->params, 1);
-    assert(APE_STREQ(id_y->name, "y"));
+    assert(APE_STREQ(id_y->value, "y"));
 
     code_block_t *body_stmt = fn->body;
     assert(body_stmt);
@@ -602,7 +604,7 @@ static void test_call_expr_parsing() {
     call_expression_t *call_expr = &stmt->expression->call_expr;
 
     assert(call_expr->function->type == EXPRESSION_IDENT);
-    assert(APE_STREQ(call_expr->function->ident.name, "add"));
+    assert(APE_STREQ(call_expr->function->ident.value, "add"));
 
     assert(ptrarray_count(call_expr->args) == 3);
 
@@ -671,7 +673,7 @@ static void test_index_expr_parsing() {
     index_expression_t *index_expr = &stmt->expression->index_expr;
 
     assert(index_expr->left->type == EXPRESSION_IDENT);
-    assert(APE_STREQ(index_expr->left->ident.name, "myArray"));
+    assert(APE_STREQ(index_expr->left->ident.value, "myArray"));
 
     strbuf_t *buf = strbuf_make();
     expression_to_string(index_expr->index, buf);
@@ -695,7 +697,7 @@ static void test_dot_expr_parsing() {
     index_expression_t *index_expr = &stmt->expression->index_expr;
 
     assert(index_expr->left->type == EXPRESSION_IDENT);
-    assert(APE_STREQ(index_expr->left->ident.name, "myObj"));
+    assert(APE_STREQ(index_expr->left->ident.value, "myObj"));
 
     strbuf_t *buf = strbuf_make();
     expression_to_string(index_expr->index, buf);
@@ -808,10 +810,10 @@ static void test_foreach_loop() {
 
     statement_t *stmt = ptrarray_get(statements, 0);
     assert(stmt->type == STATEMENT_FOREACH);
-    assert(APE_STREQ(stmt->foreach.iterator_name, "item"));
+    assert(APE_STREQ(stmt->foreach.iterator.value, "item"));
 
     assert(stmt->foreach.source->type == EXPRESSION_IDENT);
-    assert(APE_STREQ(stmt->foreach.source->ident.name, "foo"));
+    assert(APE_STREQ(stmt->foreach.source->ident.value, "foo"));
 
     code_block_t *body = stmt->foreach.body;
     assert(ptrarray_count(body->statements) == 1);
@@ -831,7 +833,7 @@ static void test_for_loop() {
     assert(stmt->type == STATEMENT_FOR_LOOP);
 
     assert(stmt->for_loop.init->type == STATEMENT_DEFINE);
-    assert(APE_STREQ(stmt->for_loop.init->define.name, "i"));
+    assert(APE_STREQ(stmt->for_loop.init->define.name.value, "i"));
 
     assert(stmt->for_loop.test->type == EXPRESSION_INFIX);
 
@@ -867,6 +869,21 @@ static void test_logical_expressions() {
     assert(stmt->type == STATEMENT_EXPRESSION);
     assert(stmt->expression->type == EXPRESSION_LOGICAL);
     assert(stmt->expression->logical.op == OPERATOR_LOGICAL_OR);
+}
+
+static void test_recover_statement() {
+    const char *input = "recover (e) { return null; }";
+
+    ptrarray(statement_t)* statements = parse(input);
+    assert(statements);
+
+    assert(ptrarray_count(statements) == 1);
+
+    statement_t *stmt = ptrarray_get(statements, 0);
+    assert(stmt->type == STATEMENT_RECOVER);
+    assert(APE_STREQ(stmt->recover.error_ident.value, "e"));
+
+    assert(ptrarray_count(stmt->recover.body->statements) == 1);
 }
 
 #pragma GCC diagnostic pop

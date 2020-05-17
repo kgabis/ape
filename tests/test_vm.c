@@ -1013,11 +1013,9 @@ static void test_errors() {
         int column;
     } tests[] = {
         {"fn fun(x){return x;};fun()", 0, 24},
-        {"1/0", 0, 1},
         {"fn(x){}()", 0, 7},
-        {"1+1;\n1/0", 1, 1},
+        {"1+1;\ncrash()", 1, 5},
         {"1;\n2;\nfn(x){return x[0];}(1)", 2, 14},
-        {"1+true", 0, 1},
         {"1()", 0, 1},
         {"var x = 0; for (i in range(0, 10)) { if (i == 9) { x = i[\"a\"];}}", 0, 56},
         {"var arr = [1, 2, 3];\narr[4] = 5", 1, 3},

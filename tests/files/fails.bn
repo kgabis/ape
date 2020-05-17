@@ -2,7 +2,7 @@ const test_dict = make_test_dict("10r");
 const fun = fn() { const arr = [1, 2, 3]; const dict = {"a": 1, "b": 2}; const str = "lorem ipsum"; dict["a"] = 1; const res = fn(a, b, c) {  const res_str = to_str(a) + to_str(b) + to_str(c);  return res_str;fail } return res(1, 2, 3);}println(fun());
 if (true) {} elif (x) {};
 {[1,2]:1};
-1/0;
+crash();
 1%0;
 const x = 0; x += 1;
 for (while(true){};;) {};
@@ -12,3 +12,12 @@ for (;;) {;
 var x = 0; {x + 1: 2};
 var x = 0; {1 + x: 2};
 var x =
+var map = {a: 1}; map.a = ""
+var x = 1; x = ""
+fn() { var x = 1; x = "" }()
+recover (e) { return null } // top level recover
+var x = 1; for (x in [1, 2, 3]) { println(x) }
+fn() { recover (e) { recover (e) { return } return } }()
+fn() { recover (e) { recover (e1) { return } return } }()
+recover (e) { return }
+fn() { return fn() { recover (e) { return crash() } return crash() }() }()

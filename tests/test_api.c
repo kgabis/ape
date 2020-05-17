@@ -172,12 +172,6 @@ static void test_fails() {
         
         ape_t *ape = ape_make();
 
-        ape_set_builtin(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
-        ape_set_global_constant(ape, "test", ape_object_make_number(42));
-        ape_set_builtin(ape, "square_array", square_array_fun, NULL);
-        ape_set_builtin(ape, "make_test_dict", make_test_dict_fun, NULL);
-        ape_set_builtin(ape, "test_check_args", test_check_args_fun, NULL);
-
         ape_execute(ape, line);
         if (!ape_has_errors(ape)) {
             assert(false);
@@ -310,7 +304,7 @@ static void test_traceback() {
             int line;
             int column;
         } tests[] = {
-            {"c", 2, 16},
+            {"c", 2, 20},
             {"b", 6, 16},
             {"a", 10, 16},
             {"traceback", 13, 12},
@@ -497,7 +491,7 @@ static ape_object_t square_array_fun(ape_t *ape, void *data, int argc, ape_objec
     ape_object_t res = ape_object_make_array(ape);
     for (int i = 0; i < argc; i++) {
         if (ape_object_get_type(args[i]) != APE_OBJECT_NUMBER) {
-            ape_add_error(ape, "Invalid type passed to square_array");
+            ape_set_runtime_error(ape, "Invalid type passed to square_array");
             return ape_object_make_null();
         }
         double num = ape_object_get_number(args[i]);
@@ -509,13 +503,13 @@ static ape_object_t square_array_fun(ape_t *ape, void *data, int argc, ape_objec
 
 static ape_object_t make_test_dict_fun(ape_t *ape, void *data, int argc, ape_object_t *args) {
     if (argc != 1) {
-        ape_add_errorf(ape, "Invalid type passed to make_test_dict, got %d, expected 1", argc);
+        ape_set_runtime_errorf(ape, "Invalid type passed to make_test_dict, got %d, expected 1", argc);
         return ape_object_make_null();
     }
     
     if (ape_object_get_type(args[0]) != APE_OBJECT_NUMBER) {
         const char *type_name = ape_object_get_type_string(args[0]);
-        ape_add_errorf(ape, "Invalid type passed to make_test_dict, got %s", type_name);
+        ape_set_runtime_errorf(ape, "Invalid type passed to make_test_dict, got %s", type_name);
         return ape_object_make_null();
     }
 

@@ -138,10 +138,10 @@ fn vec2(x, y) {
     return {
         x: x,
         y: y,
-        __operator_add: vec2_add,
-        __operator_sub: vec2_sub,
-        __operator_minus: fn(a) { return vec2(-a.x, -a.y) },
-        __operator_mul: fn(a, b) {
+        __operator_add__: vec2_add,
+        __operator_sub__: vec2_sub,
+        __operator_minus__: fn(a) { return vec2(-a.x, -a.y) },
+        __operator_mul__: fn(a, b) {
             if (is_number(a)) {
                 return vec2(b.x * a, b.y * a)
             } else if (is_number(b)) {
@@ -167,3 +167,64 @@ assert(v.y == 4)
 v = -va
 assert(v.x == -1)
 assert(v.y == -2)
+
+assert((1|2) == 3)
+assert((1&2) == 0)
+assert((1^3) == 2)
+assert(( 1 << 16) == 65536)
+assert((-1 << 2) == -4)
+assert(( 8 >> 1) == 4)
+assert((-8 >> 1) == -4)
+
+fn recover_test_1() {
+    recover (e) {
+        return 1
+    }
+    return 2
+}
+
+assert(recover_test_1() == 2)
+
+fn recover_test_2() {
+    recover (e) {
+        return 1
+    }
+    return crash()
+}
+
+assert(recover_test_2() == 1)
+
+fn recover_test_3() {
+    recover (e) {
+        return 1
+    }
+
+    recover (e) {
+        return 2
+    }
+
+    fn recover_inner() {
+        return crash()
+    }
+
+    return recover_inner()
+}
+
+assert(recover_test_3() == 2)
+
+fn recover_test_4() {
+    recover (e) {
+        return 2
+    }
+    
+    fn recover_test_inner() {
+        recover (e) {
+            return crash()
+        }
+
+        return crash()
+    }
+    return recover_test_inner()
+}
+
+assert(recover_test_4() == 2)

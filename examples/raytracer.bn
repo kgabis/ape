@@ -1,0 +1,157 @@
+// Based on minimal raytracer by Paul Heckbert
+// More: https://fabiensanglard.net/rayTracing_back_of_business_card/
+
+const G = [
+    2048,
+    2048,
+    247822,
+    282384,
+    280720,
+    247967,
+    18577,
+    18577,
+    233230,
+];
+
+fn vec3(x, y, z) {
+    return {
+        x: x,
+        y: y,
+        z: z,
+        __operator_add__: fn(a, b) {
+            return vec3(a.x + b.x, a.y + b.y, a.z + b.z)
+        },
+        __operator_mul__: fn(a, b) {
+            if (is_number(b)) {
+                return vec3(a.x * b, a.y * b, a.z * b)
+            } else if (is_number(a)) {
+                return vec3(a * b.x, a * b.y, a * b.z)
+            }
+            assert(false)
+        },
+        __operator_mod__: fn(a, b) {
+            return a.x * b.x + a.y * b.y + a.z * b.z
+        },
+        __operator_xor__: fn(a, b) {
+            var v = vec3(0, 0, 0)
+            v.x = (a.y * b.z) - (b.y * a.z)
+            v.y = (a.z * b.x) - (b.z * a.x)
+            v.z = (a.x * b.y) - (b.x * a.y)
+            return v
+        },
+        __operator_bang__: fn(a) {
+            return a * (1 / sqrt(a % a))
+        }
+    }
+}
+
+fn test(o, d, t, n) { 
+    t = 1e9
+
+    var m = 0
+    var p = -o.z / d.z
+
+    if (0.01 < p) {
+        t = p
+        n = vec3(0, 0, 1)
+        m = 1
+    }
+
+    for (var k = 18; k >= 0; k -= 1) {
+        for (var j = 8; j >= 0; j -= 1) {        
+            if (G[j] & 1 << k) {                
+                var p2 = o + vec3(-k, 0, -j - 4)
+                var b = p2 % d
+                var c = p2 % p2 - 1
+                var q = b * b - c
+                
+                if (q > 0) {
+                    var s = -b - sqrt(q)
+
+                    if (s < t && s > 0.01) {
+                        t = s
+                        n = !(p2 + d * t)
+                        m = 2
+                    }
+                }
+            }
+        }
+    }
+    return {
+        m: m,
+        t: t,
+        n: n,
+    };
+  }
+
+
+fn sample(o, d) {
+    var t = 0
+    var n = vec3(0, 0, 0)
+    var test_res = test(o, d, t, n)
+    var m = test_res.m
+    t = test_res.t
+    n = test_res.n
+
+    if (m == 0) {
+        return vec3(0.7, 0.6, 1.0) * pow(1 - d.z, 4)
+    }
+
+    var h = o + d * t
+    var l = !(vec3(9 + random(), 9 + random(), 16) + h * - 1)
+    var r = d + n * (n % d * - 2)
+
+    var b = l % n
+
+    if (b < 0) {
+        b = 0
+    } else {
+        test_res = test(h, l, t, n)
+        t = test_res.t
+        n = test_res.n
+        if (test_res.m) {
+            b = 0
+        }
+    }
+
+    var p = pow(l % r * (b > 0), 99)
+
+    if (m == 1) {
+        h = h * 0.2
+        var x = floor(ceil(h.x) + ceil(h.y)) & 1
+        if (x) {
+            return vec3(3, 1, 1) * (b * 0.2 + 0.1)
+        } else {
+            return vec3(3, 3, 3) * (b * 0.2 + 0.1)
+        }
+    }
+
+    return vec3(p, p, p) + sample(h, r) * 0.5
+}
+
+fn main() {
+    print("P3 512 512 255 ")
+    
+    var g = !vec3(-6, -16, 0)
+    var a = !(vec3(0, 0, 1) ^ g) * 0.002
+    var b = !(g^a) * 0.002
+    var c = (a+b) * -256 + g
+
+    for (var y = 511; y >= 0; y -= 1) {
+        for (var x = 511; x >= 0; x -= 1) {
+            var p = vec3(13, 13, 13)
+            for (var r = 0; r < 64; r += 1) { 
+                var t = a * (random() - 0.5) * 99 + b * (random() - 0.5) * 99
+                p = sample(vec3(17,16,8) + t, !(t * -1 + (a * (random() + x) + b * (y + random()) + c) * 16)) * 3.5 + p
+            }
+            print(floor(p.x))
+            print(" ")
+            print(floor(p.y))
+            print(" ")
+            print(floor(p.z))
+            print(" ")
+        }
+    }
+}
+
+main()
