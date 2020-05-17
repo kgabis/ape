@@ -30,11 +30,11 @@
 				},
 				{
 					"name": "keyword.operator.assignment.ape",
-					"match": "(\\+\\=|-\\=|\\*\\=|/\\=|%=|&=|\\|=|^=|<<=|>>=|\\=)"
+					"match": "(\\+\\=|-\\=|\\*\\=|/\\=|%=|&=|\\|=|\\^=|<<=|>>=|\\=)"
 				},
 				{
 					"name": "keyword.operator.arithmetic.ape",
-					"match": "(\\+|\\-|\\*|(\\b/\\b)|%|&|\\||^|<<|>>)"
+					"match": "(\\+|\\-|\\*|(\\b/\\b)|%|&|\\||\\^|<<|>>)"
 				},
 				{
 					"name": "keyword.operator.comparison.ape",
