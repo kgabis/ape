@@ -1,3 +1,6 @@
+// Based on minimal raytracer by Paul Heckbert
+// More: https://fabiensanglard.net/rayTracing_back_of_business_card/
+
 const G = [
     2048,
     2048,

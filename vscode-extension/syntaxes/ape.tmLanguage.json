@@ -1,0 +1,98 @@
+{
+	"$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+	"name": "ape",
+	"patterns": [
+		{
+			"include": "#keywords"
+		},
+		{
+			"include": "#strings_double"
+		},
+		{
+			"include": "#strings_single"
+		},
+		{
+			"include": "#comments"
+		},
+		{
+			"include": "#constants"
+		},
+		{
+			"include": "#numeric"
+		}
+	],
+	"repository": {
+		"keywords": {
+			"patterns": [
+				{
+					"name": "keyword.control.ape",
+					"match": "\\b(fn|const|var|true|false|if|else|return|while|break|for|in|continue|error|import|recover|crash)\\b"
+				},
+				{
+					"name": "keyword.operator.assignment.ape",
+					"match": "(\\+\\=|-\\=|\\*\\=|/\\=|%=|&=|\\|=|^=|<<=|>>=|\\=)"
+				},
+				{
+					"name": "keyword.operator.arithmetic.ape",
+					"match": "(\\+|\\-|\\*|(\\b/\\b)|%|&|\\||^|<<|>>)"
+				},
+				{
+					"name": "keyword.operator.comparison.ape",
+					"match": "(<\\=|>\\=|\\=\\=|<|>|\\!\\=)"
+				}			  
+			]
+		},
+		"strings_double": {
+			"patterns": [
+				{
+					"name": "string.quoted.double.ape",
+					"begin": "\"",
+					"end": "\""
+				},
+				{
+					"name": "constant.character.escape.ape",
+					"match": "\\\\."
+				}
+			]
+		},
+		"strings_single": {
+			"patterns": [
+				{
+					"name": "string.quoted.single.ape",
+					"begin": "'",
+					"end": "'"
+				},
+				{
+					"name": "constant.character.escape.ape",
+					"match": "\\\\."
+				}
+			]
+		},
+		"comments": {
+			"patterns": [
+			  {
+				"name": "comment.line.ape",
+				"begin": "//",
+				"end": "$"
+			  }
+			]
+		},
+		"constants": {
+			"patterns": [
+			  {
+				"name": "constant.language.ape",
+				"match": "\\b(null|true|false)\\b"
+			  }
+			]
+		},
+		"numeric": {
+			"patterns": [
+			  {
+				"name": "constant.numeric.decimal.ape",
+				"match": "\\b[0-9]([0-9]|\\.)*\\b"
+			  }
+			]
+		}
+	},
+	"scopeName": "source.ape"
+}

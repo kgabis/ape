@@ -203,6 +203,10 @@ It can be joined back into a single file with utils/join.py:
 utils/join.py --template utils/ape.c.templ --path ape --output ape.c
 ```
 
+## Visual Studio Code extension
+
+A Visual Studio Code extension can be found [here](https://marketplace.visualstudio.com/items?itemName=KrzysztofGabis.apelang).
+
 ## My other projects
 * [parson](https://github.com/kgabis/parson) - JSON library
 * [kgflags](https://github.com/kgabis/kgflags) - command-line flag parsing library   
