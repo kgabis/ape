@@ -167,7 +167,7 @@ THE SOFTWARE.
 typedef void * (*collections_malloc_fn)(size_t size);
 typedef void (*collections_free_fn)(void *ptr);
 typedef unsigned long (*collections_hash_fn)(const void* val);
-typedef int (*collections_equals_fn)(const void *a, const void *b);
+typedef bool (*collections_equals_fn)(const void *a, const void *b);
 
 COLLECTIONS_API void collections_set_memory_functions(collections_malloc_fn malloc_fn, collections_free_fn free_fn);
 
@@ -208,7 +208,7 @@ typedef struct valdict_ valdict_t_;
 #define valdict_make(key_type, val_type) valdict_make_(sizeof(key_type), sizeof(val_type))
 
 COLLECTIONS_API valdict_t_* valdict_make_(size_t key_size, size_t val_size);
-COLLECTIONS_API valdict_t_* valdict_make_with_capacity(unsigned int capacity, size_t key_size, size_t val_size);
+COLLECTIONS_API valdict_t_* valdict_make_with_capacity(unsigned int min_capacity, size_t key_size, size_t val_size);
 COLLECTIONS_API void        valdict_destroy(valdict_t_ *dict);
 COLLECTIONS_API void        valdict_set_hash_function(valdict_t_ *dict, collections_hash_fn hash_fn);
 COLLECTIONS_API void        valdict_set_equals_function(valdict_t_ *dict, collections_equals_fn equals_fn);
@@ -1075,6 +1075,8 @@ typedef struct traceback traceback_t;
 typedef struct vm vm_t;
 typedef struct gcmem gcmem_t;
 
+#define OBJECT_STRING_BUF_SIZE 32
+
 typedef enum {
     OBJECT_NONE      = 0,
     OBJECT_ERROR     = 1 << 0,
@@ -1099,12 +1101,19 @@ typedef struct object {
 } object_t;
 
 typedef struct function {
-    array(object_t) *free_vals;
-    char *name;
+    union {
+        object_t *free_vals_allocated;
+        object_t free_vals_buf[2];
+    };
+    union {
+        char *name;
+        const char *const_name;
+    };
     compilation_result_t *comp_result;
     int num_locals;
     int num_args;
-    bool owns_comp_result;
+    int free_vals_count;
+    bool owns_data;
 } function_t;
 
 typedef object_t (*builtin_fn)(vm_t *vm, void *data, int argc, object_t *args);
@@ -1129,10 +1138,19 @@ typedef struct object_error {
     traceback_t *traceback;
 } object_error_t;
 
+typedef struct object_string {
+    union {
+        char *value_allocated;
+        char value_buf[OBJECT_STRING_BUF_SIZE];
+    };
+    unsigned long hash;
+    bool is_allocated;
+} object_string_t;
+
 typedef struct object_data {
     gcmem_t *mem;
     union {
-        char *string;
+        object_string_t string;
         object_error_t error;
         array(object_t) *array;
         valdict(object_t, object_t) *map;
@@ -1159,8 +1177,9 @@ APE_INTERNAL object_t object_make_map_with_capacity(gcmem_t *mem, unsigned capac
 APE_INTERNAL object_t object_make_error(gcmem_t *mem, const char *message);
 APE_INTERNAL object_t object_make_error_no_copy(gcmem_t *mem, char *message);
 APE_INTERNAL object_t object_make_errorf(gcmem_t *mem, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
-APE_INTERNAL object_t object_make_function(gcmem_t *mem, const char *name, compilation_result_t *comp_res, bool owns_comp_res, int num_locals, int num_args);
-APE_INTERNAL object_t object_make_function(gcmem_t *mem, const char *name, compilation_result_t *comp_res, bool owns_comp_res, int num_locals, int num_args);
+APE_INTERNAL object_t object_make_function(gcmem_t *mem, const char *name, compilation_result_t *comp_res,
+                                           bool owns_data, int num_locals, int num_args,
+                                           int free_vals_count);
 APE_INTERNAL object_t object_make_external(gcmem_t *mem, void *data);
 
 APE_INTERNAL void object_deinit(object_t obj);
@@ -1189,6 +1208,11 @@ APE_INTERNAL object_type_t  object_get_type(object_t obj);
 APE_INTERNAL bool object_is_numeric(object_t obj);
 APE_INTERNAL bool object_is_null(object_t obj);
 APE_INTERNAL bool object_is_callable(object_t obj);
+
+APE_INTERNAL const char* object_get_function_name(object_t obj);
+APE_INTERNAL object_t    object_get_function_free_val(object_t obj, int ix);
+APE_INTERNAL void        object_set_function_free_val(object_t obj, int ix, object_t val);
+APE_INTERNAL object_t*   object_get_function_free_vals(object_t obj);
 
 APE_INTERNAL const char*  object_get_error_message(object_t obj);
 APE_INTERNAL void         object_set_error_traceback(object_t obj, traceback_t *traceback);
@@ -1228,12 +1252,7 @@ APE_INTERNAL bool     object_map_has_key(object_t obj, object_t key);
 typedef struct object_data object_data_t;
 typedef struct env env_t;
 
-typedef struct gcmem {
-    ptrarray(object_data_t) *objects;
-    ptrarray(object_data_t) *objects_back;
-    
-    array(object_t) *objects_not_gced;
-} gcmem_t;
+typedef struct gcmem gcmem_t;
 
 APE_INTERNAL gcmem_t *gcmem_make(void);
 APE_INTERNAL void gcmem_destroy(gcmem_t *mem);
@@ -1350,6 +1369,7 @@ APE_INTERNAL src_pos_t frame_src_position(const frame_t *frame);
 
 #define VM_STACK_SIZE 2048
 #define VM_MAX_GLOBALS 2048
+#define VM_MAX_FRAMES 2048
 
 typedef struct ape_config ape_config_t;
 typedef struct compilation_result compilation_result_t;
@@ -1362,12 +1382,14 @@ typedef struct vm {
     array(object_t) *builtins;
     object_t stack[VM_STACK_SIZE];
     int sp;
-    array(frame_t) *frames;
+    frame_t frames[VM_MAX_FRAMES];
+    int frames_count;
     ptrarray(error_t) *errors;
     object_t last_popped;
     frame_t *current_frame;
     bool running;
     error_t *runtime_error;
+    object_t operator_oveload_keys[OPCODE_MAX];
 } vm_t;
 
 APE_INTERNAL vm_t* vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors); // ape can be null (for internal testing purposes)
@@ -1906,8 +1928,8 @@ valdict_t_* valdict_make_(size_t key_size, size_t val_size) {
     return valdict_make_with_capacity(DICT_INITIAL_SIZE, key_size, val_size);
 }
 
-valdict_t_* valdict_make_with_capacity(unsigned int capacity, size_t key_size, size_t val_size) {
-    capacity = upper_power_of_two(capacity);
+valdict_t_* valdict_make_with_capacity(unsigned int min_capacity, size_t key_size, size_t val_size) {
+    unsigned int capacity = upper_power_of_two(min_capacity * 2);
 
     valdict_t_ *dict = collections_malloc(sizeof(valdict_t_));
     if (dict == NULL) {
@@ -7028,14 +7050,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             symbol_table = compiler_get_symbol_table(comp);
             
             object_t obj = object_make_function(comp->mem, fn->name, comp_res, true,
-                                                num_locals, array_count(fn->params));
-            if (object_get_type(obj) != OBJECT_FUNCTION) {
-                error_t *err = error_makef(ERROR_COMPILATION, expr->pos,
-                                           "Compiling function failed");
-                ptrarray_add(comp->errors, err);
-                ptrarray_destroy_with_items(free_symbols, symbol_destroy);
-                return false;
-            }
+                                                num_locals, array_count(fn->params), 0);
 
             for (int i = 0; i < ptrarray_count(free_symbols); i++) {
                 symbol_t *symbol = ptrarray_get(free_symbols, i);
@@ -7476,6 +7491,7 @@ static unsigned long object_hash_string(const char *str);
 static unsigned long object_hash_double(double val);
 static bool object_is_number(object_t obj);
 static uint64_t get_type_tag(object_type_t type);
+static bool freevals_are_allocated(function_t *fun);
 
 object_t object_make_number(double val) {
     object_t o = { .number = val };
@@ -7494,13 +7510,31 @@ object_t object_make_null() {
 }
 
 object_t object_make_string(gcmem_t *mem, const char *string) {
-    char *string_copy = ape_strdup(string);
-    return object_make_string_no_copy(mem, string_copy);
+    object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_STRING);
+    int len = (int)strlen(string);
+    if ((len + 1) < OBJECT_STRING_BUF_SIZE) {
+        memcpy(obj->string.value_buf, string, len + 1);
+        obj->string.is_allocated = false;
+    } else {
+        obj->string.value_allocated = ape_strdup(string);
+        obj->string.is_allocated = true;
+    }
+    obj->string.hash = object_hash_string(string);
+    return object_make(OBJECT_STRING, obj);
 }
 
 object_t object_make_string_no_copy(gcmem_t *mem, char *string) {
     object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_STRING);
-    obj->string = string;
+    int len = (int)strlen(string);
+    if ((len + 1) < OBJECT_STRING_BUF_SIZE) {
+        memcpy(obj->string.value_buf, string, len + 1);
+        ape_free(string);
+        obj->string.is_allocated = false;
+    } else {
+        obj->string.value_allocated = string;
+        obj->string.is_allocated = true;
+    }
+    obj->string.hash = object_hash_string(string);
     return object_make(OBJECT_STRING, obj);
 }
 
@@ -7578,15 +7612,23 @@ object_t object_make_errorf(gcmem_t *mem, const char *fmt, ...) {
     return object_make_error_no_copy(mem, res);
 }
 
-object_t object_make_function(gcmem_t *mem, const char *name, compilation_result_t *comp_res, bool owns_comp_res,
-                              int num_locals, int num_args) {
+object_t object_make_function(gcmem_t *mem, const char *name, compilation_result_t *comp_res, bool owns_data,
+                              int num_locals, int num_args,
+                              int free_vals_count) {
     object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_FUNCTION);
-    obj->function.name = name ? ape_strdup(name) : ape_strdup("anonymous");
+    if (owns_data) {
+        obj->function.name = name ? ape_strdup(name) : ape_strdup("anonymous");
+    } else {
+        obj->function.const_name = name ? name : "anonymous";
+    }
     obj->function.comp_result = comp_res;
-    obj->function.owns_comp_result = owns_comp_res;
+    obj->function.owns_data = owns_data;
     obj->function.num_locals = num_locals;
     obj->function.num_args = num_args;
-    obj->function.free_vals = NULL;
+    obj->function.free_vals_count = free_vals_count;
+    if (free_vals_count >= APE_ARRAY_LEN(obj->function.free_vals_buf)) {
+        obj->function.free_vals_allocated = ape_malloc(sizeof(object_t) * free_vals_count);
+    }
     return object_make(OBJECT_FUNCTION, obj);
 }
 
@@ -7612,15 +7654,19 @@ void object_data_deinit(object_data_t *data) {
             return;
         }
         case OBJECT_STRING: {
-            ape_free(data->string);
+            if (data->string.is_allocated) {
+                ape_free(data->string.value_allocated);
+            }
             break;
         }
         case OBJECT_FUNCTION: {
-            ape_free(data->function.name);
-            if (data->function.owns_comp_result) {
+            if (data->function.owns_data) {
+                ape_free(data->function.name);
                 compilation_result_destroy(data->function.comp_result);
             }
-            array_destroy(data->function.free_vals);
+            if (freevals_are_allocated(&data->function)) {
+                ape_free(data->function.free_vals_allocated);
+            }
             break;
         }
         case OBJECT_ARRAY: {
@@ -7707,7 +7753,7 @@ void object_to_string(object_t obj, strbuf_t *buf, bool quote_str) {
         }
         case OBJECT_FUNCTION: {
             const function_t *function = object_get_function(obj);
-            strbuf_appendf(buf, "CompiledFunction: %s\n", function->name);
+            strbuf_appendf(buf, "CompiledFunction: %s\n", object_get_function_name(obj));
             code_to_string(function->comp_result->bytecode, function->comp_result->src_positions, function->comp_result->count, buf);
             break;
         }
@@ -7929,7 +7975,11 @@ double object_get_number(object_t obj) {
 const char * object_get_string(object_t object) {
     APE_ASSERT(object_get_type(object) == OBJECT_STRING);
     object_data_t *data = object_get_allocated_data(object);
-    return data->string;
+    if (data->string.is_allocated) {
+        return data->string.value_allocated;
+    } else {
+        return data->string.value_buf;
+    }
 }
 
 function_t* object_get_function(object_t object) {
@@ -7972,6 +8022,74 @@ bool object_is_null(object_t obj) {
 bool object_is_callable(object_t obj) {
     object_type_t type = object_get_type(obj);
     return type == OBJECT_BUILTIN || type == OBJECT_FUNCTION;
+}
+
+const char* object_get_function_name(object_t obj) {
+    APE_ASSERT(object_get_type(obj) == OBJECT_FUNCTION);
+    object_data_t *data = object_get_allocated_data(obj);
+    APE_ASSERT(data);
+    if (!data) {
+        return NULL;
+    }
+
+    if (data->function.owns_data) {
+        return data->function.name;
+    } else {
+        return data->function.const_name;
+    }
+}
+
+object_t object_get_function_free_val(object_t obj, int ix) {
+    APE_ASSERT(object_get_type(obj) == OBJECT_FUNCTION);
+    object_data_t *data = object_get_allocated_data(obj);
+    APE_ASSERT(data);
+    if (!data) {
+        return object_make_null();
+    }
+    function_t *fun = &data->function;
+    APE_ASSERT(ix >= 0 && ix < fun->free_vals_count);
+    if (ix < 0 || ix >= fun->free_vals_count) {
+        return object_make_null();
+    }
+    if (freevals_are_allocated(fun)) {
+        return fun->free_vals_allocated[ix];
+    } else {
+        return fun->free_vals_buf[ix];
+    }
+}
+
+void object_set_function_free_val(object_t obj, int ix, object_t val) {
+    APE_ASSERT(object_get_type(obj) == OBJECT_FUNCTION);
+    object_data_t *data = object_get_allocated_data(obj);
+    APE_ASSERT(data);
+    if (!data) {
+        return;
+    }
+    function_t *fun = &data->function;
+    APE_ASSERT(ix >= 0 && ix < fun->free_vals_count);
+    if (ix < 0 || ix >= fun->free_vals_count) {
+        return;
+    }
+    if (freevals_are_allocated(fun)) {
+        fun->free_vals_allocated[ix] = val;
+    } else {
+        fun->free_vals_buf[ix] = val;
+    }
+}
+
+object_t* object_get_function_free_vals(object_t obj) {
+    APE_ASSERT(object_get_type(obj) == OBJECT_FUNCTION);
+    object_data_t *data = object_get_allocated_data(obj);
+    APE_ASSERT(data);
+    if (!data) {
+        return NULL;
+    }
+    function_t *fun = &data->function;
+    if (freevals_are_allocated(fun)) {
+        return fun->free_vals_allocated;
+    } else {
+        return fun->free_vals_buf;
+    }
 }
 
 const char* object_get_error_message(object_t object) {
@@ -8162,14 +8280,18 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
             src_pos_t *src_positions_copy = ape_malloc(sizeof(src_pos_t) * function->comp_result->count);
             memcpy(src_positions_copy, function->comp_result->src_positions, sizeof(src_pos_t) * function->comp_result->count);
             compilation_result_t *comp_res_copy = compilation_result_make(bytecode_copy, src_positions_copy, function->comp_result->count);
-            copy = object_make_function(mem, function->name, comp_res_copy, true, function->num_locals, function->num_args);
+            copy = object_make_function(mem, object_get_function_name(obj), comp_res_copy, true,
+                                        function->num_locals, function->num_args, 0);
             valdict_set(copies, &obj, &copy);
             function_t *function_copy = object_get_function(copy);
-            function_copy->free_vals = array_make_with_capacity(array_count(function->free_vals), sizeof(object_t));
-            for (int i = 0; i < array_count(function->free_vals); i++) {
-                object_t *free_val = array_get(function->free_vals, i);
-                object_t free_val_copy = object_deep_copy_internal(mem, *free_val, copies);
-                array_add(function_copy->free_vals, &free_val_copy);
+            if (freevals_are_allocated(function)) {
+                function_copy->free_vals_allocated = ape_malloc(sizeof(object_t) * function->free_vals_count);
+            }
+            function_copy->free_vals_count = function->free_vals_count;
+            for (int i = 0; i < function->free_vals_count; i++) {
+                object_t free_val = object_get_function_free_val(obj, i);
+                object_t free_val_copy = object_deep_copy_internal(mem, free_val, copies);
+                object_set_function_free_val(copy, i, free_val_copy);
             }
             break;
         }
@@ -8228,8 +8350,8 @@ static unsigned long object_hash(object_t *obj_ptr) {
             return val;
         }
         case OBJECT_STRING: {
-            const char *str = object_get_string(obj);
-            return object_hash_string(str);
+            object_data_t *data = object_get_allocated_data(obj);
+            return data->string.hash;
         }
         default: {
             return 0;
@@ -8266,6 +8388,10 @@ static uint64_t get_type_tag(object_type_t type) {
         default:          return 4;
     }
 }
+
+static bool freevals_are_allocated(function_t *fun) {
+    return fun->free_vals_count >= APE_ARRAY_LEN(fun->free_vals_buf);
+}
 //FILE_END
 //FILE_START:gc.c
 #include <stdlib.h>
@@ -8277,12 +8403,25 @@ static uint64_t get_type_tag(object_type_t type) {
 #include "object.h"
 #endif
 
+#define GCMEM_POOL_SIZE 1024
+
+typedef struct gcmem {
+    ptrarray(object_data_t) *objects;
+    ptrarray(object_data_t) *objects_back;
+
+    array(object_t) *objects_not_gced;
+
+    object_data_t *pool[GCMEM_POOL_SIZE];
+    int pool_index;
+} gcmem_t;
+
 gcmem_t *gcmem_make() {
     gcmem_t *mem = ape_malloc(sizeof(gcmem_t));
     memset(mem, 0, sizeof(gcmem_t));
     mem->objects = ptrarray_make();
     mem->objects_back = ptrarray_make();
     mem->objects_not_gced = array_make(object_t);
+    mem->pool_index = -1;
     return mem;
 }
 
@@ -8298,12 +8437,21 @@ void gcmem_destroy(gcmem_t *mem) {
     ptrarray_destroy(mem->objects);
     ptrarray_destroy(mem->objects_back);
     array_destroy(mem->objects_not_gced);
+    for (int i = 0; i <= mem->pool_index; i++) {
+        ape_free(mem->pool[i]);
+    }
     memset(mem, 0, sizeof(gcmem_t));
     ape_free(mem);
 }
 
 object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type) {
-    object_data_t *data = ape_malloc(sizeof(object_data_t));
+    object_data_t *data = NULL;
+    if (mem->pool_index >= 0) {
+        data = mem->pool[mem->pool_index];
+        mem->pool_index--;
+    } else {
+        data = ape_malloc(sizeof(object_data_t));
+    }
     memset(data, 0, sizeof(object_data_t));
     ptrarray_add(mem->objects, data);
     data->mem = mem;
@@ -8356,9 +8504,9 @@ void gc_mark_object(object_t obj) {
         }
         case OBJECT_FUNCTION: {
             function_t *function = object_get_function(obj);
-            for (int i = 0; i < array_count(function->free_vals); i++) {
-                object_t *free_val = array_get(function->free_vals, i);
-                gc_mark_object(*free_val);
+            for (int i = 0; i < function->free_vals_count; i++) {
+                object_t free_val = object_get_function_free_val(obj, i);
+                gc_mark_object(free_val);
             }
             break;
         }
@@ -8378,7 +8526,12 @@ void gc_sweep(gcmem_t *mem) {
             ptrarray_add(mem->objects_back, data);
         } else {
             object_data_deinit(data);
-            ape_free(data);
+            if (mem->pool_index < (GCMEM_POOL_SIZE - 1)) {
+                mem->pool_index++;
+                mem->pool[mem->pool_index] = data;
+            } else {
+                ape_free(data);
+            }
         }
     }
     ptrarray(object_t) *objs_temp = mem->objects;
@@ -9239,11 +9392,9 @@ void traceback_append(traceback_t *traceback, const char *function_name, src_pos
 }
 
 void traceback_append_from_vm(traceback_t *traceback, vm_t *vm) {
-    int count = array_count(vm->frames);
-    for (int i = count - 1; i >= 0; i--) {
-        frame_t *frame = array_get(vm->frames, i);
-        function_t *function = object_get_function(frame->function);
-        traceback_append(traceback, function->name, frame_src_position(frame));
+    for (int i = vm->frames_count - 1; i >= 0; i--) {
+        frame_t *frame = &vm->frames[i];
+        traceback_append(traceback, object_get_function_name(frame->function), frame_src_position(frame));
     }
 }
 
@@ -9363,7 +9514,7 @@ static void set_sp(vm_t *vm, int new_sp);
 static void stack_push(vm_t *vm, object_t obj);
 static object_t stack_pop(vm_t *vm);
 static object_t stack_get(vm_t *vm, int nth_item);
-static void push_frame(vm_t *vm, frame_t frame);
+static bool push_frame(vm_t *vm, frame_t frame);
 static bool pop_frame(vm_t *vm);
 static void run_gc(vm_t *vm, array(object_t) *constants);
 static bool call_object(vm_t *vm, object_t callee, int num_args);
@@ -9378,7 +9529,7 @@ vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *error
     vm->mem = mem;
     vm->globals_count = 0;
     vm->sp = 0;
-    vm->frames = array_make(frame_t);
+    vm->frames_count = 0;
     vm->builtins = array_make(object_t);
     vm->errors = errors;
     vm->runtime_error = NULL;
@@ -9390,6 +9541,28 @@ vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *error
         array_add(vm->builtins, &builtin);
     }
 
+    for (int i = 0; i < OPCODE_MAX; i++) {
+        vm->operator_oveload_keys[i] = object_make_null();
+    }
+#define SET_OPERATOR_OVERLOAD_KEY(op, key) do {\
+    object_t key_obj = object_make_string(vm->mem, key);\
+    vm->operator_oveload_keys[op] = key_obj;\
+} while (0)
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_ADD,     "__operator_add__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_SUB,     "__operator_sub__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_MUL,     "__operator_mul__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_DIV,     "__operator_div__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_MOD,     "__operator_mod__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_OR,      "__operator_or__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_XOR,     "__operator_xor__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_AND,     "__operator_and__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_LSHIFT,  "__operator_lshift__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_RSHIFT,  "__operator_rshift__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_MINUS,   "__operator_minus__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_BANG,    "__operator_bang__");
+    SET_OPERATOR_OVERLOAD_KEY(OPCODE_COMPARE, "__cmp__");
+#undef SET_OPERATOR_OVERLOAD_KEY
+
     return vm;
 }
 
@@ -9398,24 +9571,23 @@ void vm_destroy(vm_t *vm) {
         return;
     }
     array_destroy(vm->builtins);
-    array_destroy(vm->frames);
     ape_free(vm);
 }
 
 void vm_reset(vm_t *vm) {
     vm->sp = 0;
-    while (array_count(vm->frames) > 0) {
+    while (vm->frames_count > 0) {
         pop_frame(vm);
     }
 }
 
 bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants) {
     int old_sp = vm->sp;
-    int old_frames_count = array_count(vm->frames);
-    object_t main_fn = object_make_function(vm->mem, "main", comp_res, false, 0, 0);
+    int old_frames_count = vm->frames_count;
+    object_t main_fn = object_make_function(vm->mem, "main", comp_res, false, 0, 0, 0);
     stack_push(vm, main_fn);
     bool res = vm_execute_function(vm, main_fn, constants);
-    while (array_count(vm->frames) > old_frames_count) {
+    while (vm->frames_count > old_frames_count) {
         pop_frame(vm);
     }
     APE_ASSERT(vm->sp == old_sp);
@@ -9426,7 +9598,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
     object_type_t type = object_get_type(callee);
     if (type == OBJECT_FUNCTION) {
         int old_sp = vm->sp;
-        int old_frames_count = array_count(vm->frames);
+        int old_frames_count = vm->frames_count;
         stack_push(vm, callee);
         for (int i = 0; i < argc; i++) {
             stack_push(vm, args[i]);
@@ -9435,7 +9607,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
         if (!ok) {
             return object_make_null();
         }
-        while (array_count(vm->frames) > old_frames_count) {
+        while (vm->frames_count > old_frames_count) {
             pop_frame(vm);
         }
         APE_ASSERT(vm->sp == old_sp);
@@ -9456,14 +9628,18 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
         return false;
     }
 
-    vm->running = true;
-
-    vm->last_popped = object_make_null();
-
     function_t *function_function = object_get_function(function); // naming is hard
     frame_t new_frame;
     frame_init(&new_frame, function, vm->sp - function_function->num_args);
-    push_frame(vm, new_frame);
+    bool ok = push_frame(vm, new_frame);
+    if (!ok) {
+        error_t *err = error_make(ERROR_USER, src_pos_invalid, "Pushing frame failed");
+        ptrarray_add(vm->errors, err);
+        return false;
+    }
+
+    vm->running = true;
+    vm->last_popped = object_make_null();
 
     int ticks_between_gc = 0;
     if (vm->config) {
@@ -9884,53 +10060,29 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     goto err;
                 }
 
-                array(object_t) *free_vals = array_make(object_t);
+                const function_t *constant_function = object_get_function(*constant);
+                object_t function_obj = object_make_function(vm->mem, object_get_function_name(*constant),
+                                                            constant_function->comp_result, false,
+                                                            constant_function->num_locals, constant_function->num_args,
+                                                            num_free);
                 for (int i = 0; i < num_free; i++) {
                     object_t free_val = vm->stack[vm->sp - num_free + i];
-                    array_add(free_vals, &free_val);
+                    object_set_function_free_val(function_obj, i, free_val);
                 }
-                const function_t *constant_function = object_get_function(*constant);
-                object_t function_obj = object_make_function(vm->mem, constant_function->name,
-                                                            constant_function->comp_result, false,
-                                                            constant_function->num_locals, constant_function->num_args);
-                if (object_get_type(function_obj) != OBJECT_FUNCTION) {
-                    error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Making function failed");
-                    vm_set_runtime_error(vm, err);
-                    array_destroy(free_vals);
-                    goto err;
-                }
-                function_t *function_function = object_get_function(function_obj);
-                function_function->free_vals = free_vals;
                 set_sp(vm, vm->sp - num_free);
                 stack_push(vm, function_obj);
                 break;
             }
             case OPCODE_GET_FREE: {
                 uint8_t free_ix = frame_read_uint8(vm->current_frame);
-                function_t *function = object_get_function(vm->current_frame->function);
-                array(object_t) *free_vals = function->free_vals;
-                object_t *val = array_get(free_vals, free_ix);
-                if (!val) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
-                                               "Free value %d not found", free_ix);
-                    vm_set_runtime_error(vm, err);
-                    goto err;
-                }
-                stack_push(vm, *val);
+                object_t val = object_get_function_free_val(vm->current_frame->function, free_ix);
+                stack_push(vm, val);
                 break;
             }
             case OPCODE_SET_FREE: {
                 uint8_t free_ix = frame_read_uint8(vm->current_frame);
-                function_t *function = object_get_function(vm->current_frame->function);
-                array(object_t) *free_vals = function->free_vals;
                 object_t val = stack_pop(vm);
-                bool ok = array_set(free_vals, free_ix, &val);
-                if (!ok) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
-                                               "Setting free value at %d failed", free_ix);
-                    vm_set_runtime_error(vm, err);
-                    goto err;
-                }
+                object_set_function_free_val(vm->current_frame->function, free_ix, val);
                 break;
             }
             case OPCODE_CURRENT_FUNCTION: {
@@ -10024,8 +10176,8 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
     err:
         if (vm->runtime_error != NULL) {
             int recover_frame_ix = -1;
-            for (int i = array_count(vm->frames) - 1; i >= 0; i--) {
-                frame_t *frame = array_get(vm->frames, i);
+            for (int i = vm->frames_count - 1; i >= 0; i--) {
+                frame_t *frame = &vm->frames[i];
                 if (frame->recover_ip >= 0 && !frame->is_recovering) {
                     recover_frame_ix = i;
                     break;
@@ -10039,7 +10191,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     err->traceback = traceback_make();
                 }
                 traceback_append_from_vm(err->traceback, vm);
-                while (array_count(vm->frames) > (recover_frame_ix + 1)) {
+                while (vm->frames_count > (recover_frame_ix + 1)) {
                     pop_frame(vm);
                 }
                 object_t err_obj = object_make_error(vm->mem, err->message);
@@ -10184,20 +10336,32 @@ static object_t stack_get(vm_t *vm, int nth_item) {
     return vm->stack[ix];
 }
 
-static void push_frame(vm_t *vm, frame_t frame) {
-    array_push(vm->frames, &frame);
-    vm->current_frame = array_top(vm->frames);
+static bool push_frame(vm_t *vm, frame_t frame) {
+    if (vm->frames_count >= VM_MAX_FRAMES) {
+        APE_ASSERT(false);
+        return false;
+    }
+    vm->frames[vm->frames_count] = frame;
+    vm->current_frame = &vm->frames[vm->frames_count];
+    vm->frames_count++;
     function_t *frame_function = object_get_function(frame.function);
     set_sp(vm, frame.base_pointer + frame_function->num_locals);
+    return true;
 }
 
 static bool pop_frame(vm_t *vm) {
     set_sp(vm, vm->current_frame->base_pointer - 1);
-    array_pop(vm->frames, NULL);
-    vm->current_frame = array_top(vm->frames);
-    if (!vm->current_frame) {
+    if (vm->frames_count <= 0) {
+        APE_ASSERT(false);
+        vm->current_frame = NULL;
         return false;
     }
+    vm->frames_count--;
+    if (vm->frames_count == 0) {
+        vm->current_frame = NULL;
+        return false;
+    }
+    vm->current_frame = &vm->frames[vm->frames_count - 1];
     return true;
 }
 
@@ -10206,12 +10370,13 @@ static void run_gc(vm_t *vm, array(object_t) *constants) {
     gc_mark_objects(array_data(vm->builtins), array_count(vm->builtins));
     gc_mark_objects(array_data(constants), array_count(constants));
     gc_mark_objects(vm->globals, vm->globals_count);
-    for (int i = 0; i < array_count(vm->frames); i++) {
-        frame_t *frame = array_get(vm->frames, i);
+    for (int i = 0; i < vm->frames_count; i++) {
+        frame_t *frame = &vm->frames[i];
         gc_mark_object(frame->function);
     }
     gc_mark_objects(vm->stack, vm->sp);
     gc_mark_object(vm->last_popped);
+    gc_mark_objects(vm->operator_oveload_keys, OPCODE_MAX);
     gc_sweep(vm->mem);
 }
 
@@ -10222,13 +10387,18 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
         if (num_args != callee_function->num_args) {
             error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                        "Invalid number of arguments to \"%s\", expected %d, got %d",
-                                       callee_function->name, callee_function->num_args, num_args);
+                                       object_get_function_name(callee), callee_function->num_args, num_args);
             vm_set_runtime_error(vm, err);
             return false;
         }
         frame_t callee_frame;
         frame_init(&callee_frame, callee, vm->sp - num_args);
-        push_frame(vm, callee_frame);
+        bool ok = push_frame(vm, callee_frame);
+        if (!ok) {
+            error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "Pushing frame failed in call_object");
+            vm_set_runtime_error(vm, err);
+            return false;
+        }
     } else if (callee_type == OBJECT_BUILTIN) {
         object_t *stack_pos = vm->stack + vm->sp - num_args;
         object_t res = call_builtin(vm, callee, frame_src_position(vm->current_frame), num_args, stack_pos);
@@ -10298,27 +10468,11 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
     }
 
     int num_operands = 2;
-    const char *key_str = "";
-    switch (op) {
-        case OPCODE_ADD:     key_str = "__operator_add__"; break;
-        case OPCODE_SUB:     key_str = "__operator_sub__"; break;
-        case OPCODE_MUL:     key_str = "__operator_mul__"; break;
-        case OPCODE_DIV:     key_str = "__operator_div__"; break;
-        case OPCODE_MOD:     key_str = "__operator_mod__"; break;
-        case OPCODE_OR:      key_str = "__operator_or__"; break;
-        case OPCODE_XOR:     key_str = "__operator_xor__"; break;
-        case OPCODE_AND:     key_str = "__operator_and__"; break;
-        case OPCODE_LSHIFT:  key_str = "__operator_lshift__"; break;
-        case OPCODE_RSHIFT:  key_str = "__operator_rshift__"; break;
-        case OPCODE_MINUS:   key_str = "__operator_minus__"; num_operands = 1; break;
-        case OPCODE_BANG:    key_str = "__operator_bang__"; num_operands = 1;  break;
-        case OPCODE_COMPARE: key_str = "__cmp__"; break;
-        default: {
-            APE_ASSERT(false);
-            return false;
-        }
+    if (op == OPCODE_MINUS || op == OPCODE_BANG) {
+        num_operands = 1;
     }
-    object_t key = object_make_string(vm->mem, key_str);
+
+    object_t key = vm->operator_oveload_keys[op];
     object_t callee = object_make_null();
     if (left_type == OBJECT_MAP) {
         callee = object_get_map_value(left, key);
@@ -10356,7 +10510,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 3
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\

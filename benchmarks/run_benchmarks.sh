@@ -18,6 +18,7 @@ echo "    OK"
 
 echo "Running benchmarks"
 ./benchmarks raytracer_profile.bn
+./benchmarks raytracer_profile_optimised.bn
 ./benchmarks primes.bn
 ./benchmarks fibonacci.bn
 echo "    OK"

@@ -21,6 +21,7 @@ int main(int argc, char *argv[]) {
     int benchmarks_main() {
         const char *tests[] = {
             "raytracer_profile.bn",
+            "raytracer_profile_optimised.bn",
             "primes.bn",
             "fibonacci.bn",
         };
@@ -57,6 +58,10 @@ static bool execute_file(const char *filename, bool must_succeed) {
         assert(false);
     }
     ape_execute_program(ape, program);
+    if (ape_has_errors(ape)) {
+        print_ape_errors(ape);
+        assert(false);
+    }
     ape_program_destroy(program);
     ape_destroy(ape);
     return true;
