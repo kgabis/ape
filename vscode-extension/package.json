@@ -4,6 +4,7 @@
     "description": "ape language support",
     "version": "0.1.2",
     "publisher": "KrzysztofGabis",
+    "icon": "images/logo.png",
     "engines": {
         "vscode": "^1.41.0"
     },

@@ -133,12 +133,12 @@ fn map_items(items, map_fn) {
 map_items([1, 2, 3], fn(x){ return x + 1 })
 
 fn make_person(name) {
-    const person = {}
-    person.name = name
-    person.greet = fn() {
-        println("Hello, I'm " + name)
+    return {
+        name: name,
+        greet: fn() {
+            println("Hello, I'm " + this.name)
+        },
     }
-    return person
 }
 ```
 

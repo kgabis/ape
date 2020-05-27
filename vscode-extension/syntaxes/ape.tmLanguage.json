@@ -26,7 +26,7 @@
 			"patterns": [
 				{
 					"name": "keyword.control.ape",
-					"match": "\\b(fn|const|var|true|false|if|else|return|while|break|for|in|continue|error|import|recover|crash)\\b"
+					"match": "\\b(fn|const|var|true|false|if|else|return|while|break|for|in|continue|error|import|recover|crash|this)\\b"
 				},
 				{
 					"name": "keyword.operator.assignment.ape",

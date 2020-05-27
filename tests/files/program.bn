@@ -58,15 +58,15 @@ fn fun() {
 println(fun())
 
 fn make_person(name) {
-    const person = {}
-    person.name = name
-    person.hello = fn() {
-        println("hello " + person.name)
+    return {
+        name: name,
+        hello: fn() {
+            println("hello " + this.name)
+        },
+        make_hello: fn() {
+            return "hello " + this.name
+        }
     }
-    person.make_hello = fn() {
-        return "hello " + person.name
-    }
-    return person
 }
 
 const person = make_person("Krzysztof")
@@ -228,3 +228,17 @@ fn recover_test_4() {
 }
 
 assert(recover_test_4() == 2)
+
+var this_test = {
+    inner: {
+        name: "lorem",
+        get_name: fn() {
+            return this.name
+        }
+    },
+    get_inner_name: fn() {
+        return this.inner.get_name()
+    }
+}
+
+assert(this_test.get_inner_name() == "lorem")

@@ -833,6 +833,7 @@ typedef enum symbol_type {
     SYMBOL_BUILTIN,
     SYMBOL_FREE,
     SYMBOL_FUNCTION,
+    SYMBOL_THIS,
 } symbol_type_t;
 
 typedef struct symbol {
@@ -866,7 +867,9 @@ APE_INTERNAL void symbol_table_add_module_symbol(symbol_table_t *st, const symbo
 APE_INTERNAL symbol_t *symbol_table_define(symbol_table_t *st, const char *name, bool assignable);
 APE_INTERNAL symbol_t *symbol_table_define_builtin(symbol_table_t *st, const char *name, int ix);
 APE_INTERNAL symbol_t *symbol_table_define_free(symbol_table_t *st, symbol_t *original);
-APE_INTERNAL symbol_t * symbol_table_define_function_name(symbol_table_t *st, const char *name, bool assignable);
+APE_INTERNAL symbol_t *symbol_table_define_function_name(symbol_table_t *st, const char *name, bool assignable);
+APE_INTERNAL symbol_t *symbol_table_define_this(symbol_table_t *st);
+
 APE_INTERNAL symbol_t *symbol_table_resolve(symbol_table_t *st, const char *name);
 
 APE_INTERNAL bool symbol_table_symbol_is_defined(symbol_table_t *st, const char *name);
@@ -919,7 +922,9 @@ typedef enum opcode_val {
     OPCODE_SET_GLOBAL,
     OPCODE_DEFINE_GLOBAL,
     OPCODE_ARRAY,
-    OPCODE_MAP,
+    OPCODE_MAP_START,
+    OPCODE_MAP_END,
+    OPCODE_GET_THIS,
     OPCODE_GET_INDEX,
     OPCODE_SET_INDEX,
     OPCODE_GET_VALUE_AT,
@@ -1370,6 +1375,7 @@ APE_INTERNAL src_pos_t frame_src_position(const frame_t *frame);
 #define VM_STACK_SIZE 2048
 #define VM_MAX_GLOBALS 2048
 #define VM_MAX_FRAMES 2048
+#define VM_THIS_STACK_SIZE 2048
 
 typedef struct ape_config ape_config_t;
 typedef struct compilation_result compilation_result_t;
@@ -1382,6 +1388,8 @@ typedef struct vm {
     array(object_t) *builtins;
     object_t stack[VM_STACK_SIZE];
     int sp;
+    object_t this_stack[VM_THIS_STACK_SIZE];
+    int this_sp;
     frame_t frames[VM_MAX_FRAMES];
     int frames_count;
     ptrarray(error_t) *errors;
@@ -5724,6 +5732,9 @@ symbol_t *symbol_table_define(symbol_table_t *table, const char *name, bool assi
     if (strchr(name, ':')) {
         return NULL; // module symbol
     }
+    if (APE_STREQ(name, "this")) {
+        return NULL; // this is reserved
+    }
     symbol_type_t symbol_type = table->outer == NULL ? SYMBOL_GLOBAL : SYMBOL_LOCAL;
     int ix = next_symbol_index(table);
     symbol_t *symbol = symbol_make(name, symbol_type, ix, assignable);
@@ -5762,6 +5773,12 @@ symbol_t * symbol_table_define_function_name(symbol_table_t *st, const char *nam
     return symbol;
 }
 
+symbol_t *symbol_table_define_this(symbol_table_t *st) {
+    symbol_t *symbol = symbol_make("this", SYMBOL_THIS, 0, false);
+    set_symbol(st, symbol);
+    return symbol;
+}
+
 symbol_t *symbol_table_resolve(symbol_table_t *table, const char *name) {
     symbol_t *symbol = NULL;
     block_scope_t *scope = NULL;
@@ -5772,6 +5789,11 @@ symbol_t *symbol_table_resolve(symbol_table_t *table, const char *name) {
             break;
         }
     }
+
+    if (symbol && symbol->type == SYMBOL_THIS) {
+        symbol = symbol_table_define_free(table, symbol);
+    }
+
     if (!symbol && table->outer) {
         symbol = symbol_table_resolve(table->outer, name);
         if (!symbol || symbol->type == SYMBOL_GLOBAL || symbol->type == SYMBOL_BUILTIN) {
@@ -5893,7 +5915,9 @@ static opcode_definition_t g_definitions[OPCODE_MAX + 1] = {
     {"SET_GLOBAL", 1, {2}},
     {"DEFINE_GLOBAL", 1, {2}},
     {"ARRAY", 1, {2}},
-    {"MAP", 1, {2}},
+    {"MAP_START", 1, {2}},
+    {"MAP_END", 1, {2}},
+    {"GET_THIS", 0, {0}},
     {"GET_INDEX", 0, {0}},
     {"SET_INDEX", 0, {0}},
     {"GET_VALUE_AT", 0, {0}},
@@ -6943,6 +6967,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
         case EXPRESSION_MAP_LITERAL: {
             const map_literal_t *map = &expr->map;
             int len = ptrarray_count(map->keys);
+            compiler_emit(comp, OPCODE_MAP_START, 1, (uint64_t[]){len * 2});
             for (int i = 0; i < len; i++) {
                 const expression_t *key = ptrarray_get(map->keys, i);
                 const expression_t *val = ptrarray_get(map->values, i);
@@ -6957,7 +6982,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                     return false;
                 }
             }
-            compiler_emit(comp, OPCODE_MAP, 1, (uint64_t[]){len * 2});
+            compiler_emit(comp, OPCODE_MAP_END, 1, (uint64_t[]){len * 2});
             break;
         }
         case EXPRESSION_PREFIX: {
@@ -7019,6 +7044,13 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                     ptrarray_add(comp->errors, err);
                     return false;
                 }
+            }
+
+            symbol_t *this_symbol = symbol_table_define_this(symbol_table);
+            if (!this_symbol) {
+                error_t *err = error_make(ERROR_COMPILATION, expr->pos, "Cannot define \"this\" symbol");
+                ptrarray_add(comp->errors, err);
+                return false;
             }
 
             for (int i = 0; i < array_count(expr->fn_literal.params); i++) {
@@ -7233,6 +7265,8 @@ static void read_symbol(compiler_t *comp, symbol_t *symbol) {
         compiler_emit(comp, OPCODE_GET_FREE, 1, (uint64_t[]){symbol->index});
     } else if (symbol->type == SYMBOL_FUNCTION) {
         compiler_emit(comp, OPCODE_CURRENT_FUNCTION, 0, NULL);
+    } else if (symbol->type == SYMBOL_THIS) {
+        compiler_emit(comp, OPCODE_GET_THIS, 0, NULL);
     }
 }
 
@@ -9514,6 +9548,11 @@ static void set_sp(vm_t *vm, int new_sp);
 static void stack_push(vm_t *vm, object_t obj);
 static object_t stack_pop(vm_t *vm);
 static object_t stack_get(vm_t *vm, int nth_item);
+
+static void this_stack_push(vm_t *vm, object_t obj);
+static object_t this_stack_pop(vm_t *vm);
+static object_t this_stack_get(vm_t *vm, int nth_item);
+
 static bool push_frame(vm_t *vm, frame_t frame);
 static bool pop_frame(vm_t *vm);
 static void run_gc(vm_t *vm, array(object_t) *constants);
@@ -9529,6 +9568,7 @@ vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *error
     vm->mem = mem;
     vm->globals_count = 0;
     vm->sp = 0;
+    vm->this_sp = 0;
     vm->frames_count = 0;
     vm->builtins = array_make(object_t);
     vm->errors = errors;
@@ -9576,6 +9616,7 @@ void vm_destroy(vm_t *vm) {
 
 void vm_reset(vm_t *vm) {
     vm->sp = 0;
+    vm->this_sp = 0;
     while (vm->frames_count > 0) {
         pop_frame(vm);
     }
@@ -9583,6 +9624,7 @@ void vm_reset(vm_t *vm) {
 
 bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants) {
     int old_sp = vm->sp;
+    int old_this_sp = vm->this_sp;
     int old_frames_count = vm->frames_count;
     object_t main_fn = object_make_function(vm->mem, "main", comp_res, false, 0, 0, 0);
     stack_push(vm, main_fn);
@@ -9591,6 +9633,7 @@ bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants
         pop_frame(vm);
     }
     APE_ASSERT(vm->sp == old_sp);
+    vm->this_sp = old_this_sp;
     return res;
 }
 
@@ -9598,6 +9641,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
     object_type_t type = object_get_type(callee);
     if (type == OBJECT_FUNCTION) {
         int old_sp = vm->sp;
+        int old_this_sp = vm->this_sp;
         int old_frames_count = vm->frames_count;
         stack_push(vm, callee);
         for (int i = 0; i < argc; i++) {
@@ -9611,6 +9655,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
             pop_frame(vm);
         }
         APE_ASSERT(vm->sp == old_sp);
+        vm->this_sp = old_this_sp;
         return vm_get_last_popped(vm);
     } else if (type == OBJECT_BUILTIN) {
         return call_builtin(vm, callee, src_pos_invalid, argc, args);
@@ -9879,9 +9924,15 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 stack_push(vm, array_obj);
                 break;
             }
-            case OPCODE_MAP: {
+            case OPCODE_MAP_START: {
                 uint16_t count = frame_read_uint16(vm->current_frame);
                 object_t map_obj = object_make_map_with_capacity(vm->mem, count);
+                this_stack_push(vm, map_obj);
+                break;
+            }
+            case OPCODE_MAP_END: {
+                uint16_t count = frame_read_uint16(vm->current_frame);
+                object_t map_obj = this_stack_pop(vm);
                 object_t *kvpairs = vm->stack + vm->sp - count;
                 for (int i = 0; i < count; i += 2) {
                     object_t key = kvpairs[i];
@@ -9899,6 +9950,11 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 }
                 set_sp(vm, vm->sp - count);
                 stack_push(vm, map_obj);
+                break;
+            }
+            case OPCODE_GET_THIS: {
+                object_t obj = this_stack_get(vm, 0);
+                stack_push(vm, obj);
                 break;
             }
             case OPCODE_GET_INDEX: {
@@ -10336,6 +10392,46 @@ static object_t stack_get(vm_t *vm, int nth_item) {
     return vm->stack[ix];
 }
 
+static void this_stack_push(vm_t *vm, object_t obj) {
+#ifdef APE_DEBUG
+    if (vm->this_sp >= VM_THIS_STACK_SIZE) {
+        APE_ASSERT(false);
+        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "this stack overflow");
+        vm_set_runtime_error(vm, err);
+        return;
+    }
+#endif
+    vm->this_stack[vm->this_sp] = obj;
+    vm->this_sp++;
+}
+
+static object_t this_stack_pop(vm_t *vm) {
+#ifdef APE_DEBUG
+    if (vm->this_sp == 0) {
+        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "this stack underflow");
+        vm_set_runtime_error(vm, err);
+        APE_ASSERT(false);
+        return object_make_null();
+    }
+#endif
+    vm->this_sp--;
+    return vm->this_stack[vm->this_sp];
+}
+
+static object_t this_stack_get(vm_t *vm, int nth_item) {
+    int ix = vm->this_sp - 1 - nth_item;
+#ifdef APE_DEBUG
+    if (ix < 0 || ix >= VM_THIS_STACK_SIZE) {
+        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                                   "Invalid this stack index: %d", nth_item);
+        vm_set_runtime_error(vm, err);
+        APE_ASSERT(false);
+        return object_make_null();
+    }
+#endif
+    return vm->this_stack[ix];
+}
+
 static bool push_frame(vm_t *vm, frame_t frame) {
     if (vm->frames_count >= VM_MAX_FRAMES) {
         APE_ASSERT(false);
@@ -10375,6 +10471,7 @@ static void run_gc(vm_t *vm, array(object_t) *constants) {
         gc_mark_object(frame->function);
     }
     gc_mark_objects(vm->stack, vm->sp);
+    gc_mark_objects(vm->this_stack, vm->this_sp);
     gc_mark_object(vm->last_popped);
     gc_mark_objects(vm->operator_oveload_keys, OPCODE_MAX);
     gc_sweep(vm->mem);
@@ -10509,8 +10606,8 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 3
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_MINOR 4
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
