@@ -44,10 +44,10 @@ extern "C"
 #endif
 
 #define APE_VERSION_MAJOR 0
-#define APE_VERSION_MINOR 4
+#define APE_VERSION_MINOR 5
 #define APE_VERSION_PATCH 0
 
-#define APE_VERSION_STRING "0.4.0"
+#define APE_VERSION_STRING "0.5.0"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
@@ -64,22 +64,22 @@ typedef enum ape_error_type {
 } ape_error_type_t;
 
 typedef enum ape_object_type {
-    APE_OBJECT_NONE     = 0,
-    APE_OBJECT_ERROR    = 1 << 0,
-    APE_OBJECT_NUMBER   = 1 << 1,
-    APE_OBJECT_BOOL     = 1 << 2,
-    APE_OBJECT_STRING   = 1 << 3,
-    APE_OBJECT_NULL     = 1 << 4,
-    APE_OBJECT_BUILTIN  = 1 << 5,
-    APE_OBJECT_ARRAY    = 1 << 6,
-    APE_OBJECT_MAP      = 1 << 7,
-    APE_OBJECT_FUNCTION = 1 << 8,
-    APE_OBJECT_EXTERNAL = 1 << 9,
-    APE_OBJECT_FREED    = 1 << 10,
-    APE_OBJECT_ANY      = 0xffff, // for checking types with &
+    APE_OBJECT_NONE            = 0,
+    APE_OBJECT_ERROR           = 1 << 0,
+    APE_OBJECT_NUMBER          = 1 << 1,
+    APE_OBJECT_BOOL            = 1 << 2,
+    APE_OBJECT_STRING          = 1 << 3,
+    APE_OBJECT_NULL            = 1 << 4,
+    APE_OBJECT_NATIVE_FUNCTION = 1 << 5,
+    APE_OBJECT_ARRAY           = 1 << 6,
+    APE_OBJECT_MAP             = 1 << 7,
+    APE_OBJECT_FUNCTION        = 1 << 8,
+    APE_OBJECT_EXTERNAL        = 1 << 9,
+    APE_OBJECT_FREED           = 1 << 10,
+    APE_OBJECT_ANY             = 0xffff, // for checking types with &
 } ape_object_type_t;
 
-typedef ape_object_t (*ape_builtin_fn)(ape_t *ape, void *data, int argc, ape_object_t *args);
+typedef ape_object_t (*ape_native_fn)(ape_t *ape, void *data, int argc, ape_object_t *args);
 typedef void*        (*ape_malloc_fn)(size_t size);
 typedef void         (*ape_free_fn)(void *ptr);
 typedef void         (*ape_data_destroy_fn)(void* data);
@@ -129,7 +129,7 @@ bool ape_has_errors(const ape_t *ape);
 int  ape_errors_count(const ape_t *ape);
 const ape_error_t* ape_get_error(const ape_t *ape, int index);
 
-bool ape_set_builtin(ape_t *ape, const char *name, ape_builtin_fn fn, void *data);
+bool ape_set_native_function(ape_t *ape, const char *name, ape_native_fn fn, void *data);
 bool ape_set_global_constant(ape_t *ape, const char *name, ape_object_t obj);
 ape_object_t ape_get_object(ape_t *ape, const char *name);
 
@@ -154,7 +154,7 @@ ape_object_t ape_object_make_string(ape_t *ape, const char *str);
 ape_object_t ape_object_make_stringf(ape_t *ape, const char *format, ...) __attribute__ ((format (printf, 2, 3)));
 ape_object_t ape_object_make_array(ape_t *ape);
 ape_object_t ape_object_make_map(ape_t *ape);
-ape_object_t ape_object_make_builtin(ape_t *ape, ape_builtin_fn fn, void *data);
+ape_object_t ape_object_make_native_function(ape_t *ape, ape_native_fn fn, void *data);
 ape_object_t ape_object_make_error(ape_t *ape, const char *message);
 ape_object_t ape_object_make_errorf(ape_t *ape, const char *format, ...) __attribute__ ((format (printf, 2, 3)));
 ape_object_t ape_object_make_external(ape_t *ape, void *data);

@@ -94,13 +94,13 @@ static void test_program() {
 
     ape_set_stdout_write_function(ape, stdout_write, NULL);
 
-    ape_set_builtin(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
+    ape_set_native_function(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
     ape_set_global_constant(ape, "test", ape_object_make_number(42));
-    ape_set_builtin(ape, "square_array", square_array_fun, NULL);
-    ape_set_builtin(ape, "make_test_dict", make_test_dict_fun, NULL);
-    ape_set_builtin(ape, "test_check_args", test_check_args_fun, NULL);
-    ape_set_builtin(ape, "vec2_add", vec2_add_fun, NULL);
-    ape_set_builtin(ape, "vec2_sub", vec2_sub_fun, NULL);
+    ape_set_native_function(ape, "square_array", square_array_fun, NULL);
+    ape_set_native_function(ape, "make_test_dict", make_test_dict_fun, NULL);
+    ape_set_native_function(ape, "test_check_args", test_check_args_fun, NULL);
+    ape_set_native_function(ape, "vec2_add", vec2_add_fun, NULL);
+    ape_set_native_function(ape, "vec2_sub", vec2_sub_fun, NULL);
 
     ape_execute_file(ape, "program.bn");
     if (ape_has_errors(ape)) {
@@ -125,13 +125,13 @@ static void test_compiling() {
     ape_t *ape = ape_make();
     ape_set_stdout_write_function(ape, stdout_write, NULL);
 
-    ape_set_builtin(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
+    ape_set_native_function(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
     ape_set_global_constant(ape, "test", ape_object_make_number(42));
-    ape_set_builtin(ape, "square_array", square_array_fun, NULL);
-    ape_set_builtin(ape, "make_test_dict", make_test_dict_fun, NULL);
-    ape_set_builtin(ape, "test_check_args", test_check_args_fun, NULL);
-    ape_set_builtin(ape, "vec2_add", vec2_add_fun, NULL);
-    ape_set_builtin(ape, "vec2_sub", vec2_sub_fun, NULL);
+    ape_set_native_function(ape, "square_array", square_array_fun, NULL);
+    ape_set_native_function(ape, "make_test_dict", make_test_dict_fun, NULL);
+    ape_set_native_function(ape, "test_check_args", test_check_args_fun, NULL);
+    ape_set_native_function(ape, "vec2_add", vec2_add_fun, NULL);
+    ape_set_native_function(ape, "vec2_sub", vec2_sub_fun, NULL);
 
     ape_program_t *program = ape_compile(ape, code);
     if (!program || ape_has_errors(ape)) {
@@ -190,8 +190,8 @@ static void test_calling_functions() {
 
     ape_set_stdout_write_function(ape, stdout_write, NULL);
 
-    ape_set_builtin(ape, "add", add_fun, NULL);
-    ape_set_builtin(ape, "fourtytwo", fourtytwo_fun, NULL);
+    ape_set_native_function(ape, "add", add_fun, NULL);
+    ape_set_native_function(ape, "fourtytwo", fourtytwo_fun, NULL);
 
     ape_object_t res;
 
@@ -282,7 +282,7 @@ static void test_traceback() {
     g_malloc_count = 0;
     ape_t *ape = ape_make();
     
-    ape_set_builtin(ape, "custom_error", custom_error_fun, NULL);
+    ape_set_native_function(ape, "custom_error", custom_error_fun, NULL);
 
     ape_object_t res = ape_execute(ape, program);
     if (ape_has_errors(ape)) {
@@ -324,7 +324,7 @@ static void test_traceback() {
     }
 
     {
-        res = ape_call(ape, "traceback_builtin", 0, NULL);
+        res = ape_call(ape, "traceback_native_function", 0, NULL);
         if (!ape_has_errors(ape)) {
             assert(false);
         }
@@ -341,7 +341,7 @@ static void test_traceback() {
             {"c", 18, 11},
             {"b", 22, 9},
             {"a", 26, 9},
-            {"traceback_builtin", 29, 12},
+            {"traceback_native_function", 29, 12},
         };
 
         int len = ape_traceback_get_depth(traceback);
@@ -359,7 +359,7 @@ static void test_traceback() {
     }
 
     {
-        ape_object_t res = ape_call(ape, "traceback_builtin_error", 0, NULL);
+        ape_object_t res = ape_call(ape, "traceback_native_function_error", 0, NULL);
         if (ape_has_errors(ape)) {
             print_ape_errors(ape);
             assert(false);
@@ -379,7 +379,7 @@ static void test_traceback() {
             {"c", 35, 27},
             {"b", 39, 16},
             {"a", 43, 16},
-            {"traceback_builtin_error", 46, 12},
+            {"traceback_native_function_error", 46, 12},
         };
 
         assert(ape_traceback_get_depth(traceback) == APE_ARRAY_LEN(tests));
@@ -533,7 +533,7 @@ static ape_object_t test_check_args_fun(ape_t *ape, void *data, int argc, ape_ob
                   APE_OBJECT_MAP,
                   APE_OBJECT_STRING,
                   APE_OBJECT_NUMBER | APE_OBJECT_BOOL,
-                  APE_OBJECT_FUNCTION | APE_OBJECT_BUILTIN,
+                  APE_OBJECT_FUNCTION | APE_OBJECT_NATIVE_FUNCTION,
                   APE_OBJECT_ANY)) {
         return ape_object_make_null();
     }

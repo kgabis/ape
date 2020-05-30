@@ -15,7 +15,7 @@ int main() {
     assert(ape_object_get_number(res) == 84);
 
     // Calling C functions from Ape code
-    ape_set_builtin(ape, "external_add", external_add, NULL);
+    ape_set_native_function(ape, "external_add", external_add, NULL);
     ape_execute(ape, "assert(external_add(42, 42) == 84)");
     assert(!ape_has_errors(ape));
 

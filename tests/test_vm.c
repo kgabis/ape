@@ -33,7 +33,7 @@ static void test_map_literals(void);
 static void test_index_and_dot_expressions(void);
 static void test_calling_functions_without_arguments(void);
 static void test_calling_functions_with_bindings(void);
-static void test_builtins(void);
+static void test_native_functions(void);
 static void test_functions(void);
 static void test_recursive_functions(void);
 static void test_assign(void);
@@ -56,7 +56,7 @@ void vm_test() {
     test_index_and_dot_expressions();
     test_calling_functions_without_arguments();
     test_calling_functions_with_bindings();
-    test_builtins();
+    test_native_functions();
     test_functions();
     test_recursive_functions();
     test_assign();
@@ -523,7 +523,7 @@ static void test_calling_functions_with_bindings() {
     }
 }
 
-static void test_builtins() {
+static void test_native_functions() {
     struct {
         const char *input;
         bool is_null;

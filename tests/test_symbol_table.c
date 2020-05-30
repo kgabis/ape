@@ -14,7 +14,7 @@ void test_defines(void);
 void test_resolve_global(void);
 void test_resolve_local(void);
 void test_resolve_nested_local(void);
-void test_resolve_builtins(void);
+void test_resolve_native_functions(void);
 void test_resolve_free(void);
 void test_resolve_unresolvable_free(void);
 void test_define_and_resolve_function_name(void);
@@ -26,7 +26,7 @@ void symbol_table_test() {
     test_resolve_global();
     test_resolve_local();
     test_resolve_nested_local();
-    test_resolve_builtins();
+    test_resolve_native_functions();
     test_resolve_free();
     test_resolve_unresolvable_free();
     test_define_and_resolve_function_name();
@@ -156,7 +156,7 @@ void test_resolve_nested_local() {
     }
 }
 
-void test_resolve_builtins() {
+void test_resolve_native_functions() {
     symbol_table_t *global = symbol_table_make(NULL);
     symbol_table_t *first_local = symbol_table_make(global);
     symbol_table_t *second_local = symbol_table_make(first_local);
@@ -175,7 +175,7 @@ void test_resolve_builtins() {
 
     for (int i = 0; i < APE_ARRAY_LEN(expected); i++) {
         typeof(expected[0]) *exp = &expected[i];
-        symbol_table_define_builtin(global, exp->name, exp->ix);
+        symbol_table_define_native_function(global, exp->name, exp->ix);
     }
 
     for (int i = 0; i < APE_ARRAY_LEN(tables); i++) {
@@ -186,7 +186,7 @@ void test_resolve_builtins() {
             assert(symbol);
             assert(APE_STREQ(symbol->name, exp->name));
             assert(symbol->index == exp->ix);
-            assert(symbol->type == SYMBOL_BUILTIN);
+            assert(symbol->type == SYMBOL_NATIVE_FUNCTION);
         }
     }
 }

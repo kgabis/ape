@@ -830,7 +830,7 @@ typedef enum symbol_type {
     SYMBOL_NONE = 0,
     SYMBOL_GLOBAL,
     SYMBOL_LOCAL,
-    SYMBOL_BUILTIN,
+    SYMBOL_NATIVE_FUNCTION,
     SYMBOL_FREE,
     SYMBOL_FUNCTION,
     SYMBOL_THIS,
@@ -865,7 +865,7 @@ APE_INTERNAL void symbol_table_destroy(symbol_table_t *st);
 APE_INTERNAL symbol_table_t* symbol_table_copy(symbol_table_t *st);
 APE_INTERNAL void symbol_table_add_module_symbol(symbol_table_t *st, const symbol_t *symbol);
 APE_INTERNAL symbol_t *symbol_table_define(symbol_table_t *st, const char *name, bool assignable);
-APE_INTERNAL symbol_t *symbol_table_define_builtin(symbol_table_t *st, const char *name, int ix);
+APE_INTERNAL symbol_t *symbol_table_define_native_function(symbol_table_t *st, const char *name, int ix);
 APE_INTERNAL symbol_t *symbol_table_define_free(symbol_table_t *st, symbol_t *original);
 APE_INTERNAL symbol_t *symbol_table_define_function_name(symbol_table_t *st, const char *name, bool assignable);
 APE_INTERNAL symbol_t *symbol_table_define_this(symbol_table_t *st);
@@ -934,7 +934,7 @@ typedef enum opcode_val {
     OPCODE_GET_LOCAL,
     OPCODE_DEFINE_LOCAL,
     OPCODE_SET_LOCAL,
-    OPCODE_GET_BUILTIN,
+    OPCODE_GET_NATIVE_FUNCTION,
     OPCODE_FUNCTION,
     OPCODE_GET_FREE,
     OPCODE_SET_FREE,
@@ -1089,7 +1089,7 @@ typedef enum {
     OBJECT_BOOL      = 1 << 2,
     OBJECT_STRING    = 1 << 3,
     OBJECT_NULL      = 1 << 4,
-    OBJECT_BUILTIN   = 1 << 5,
+    OBJECT_NATIVE_FUNCTION   = 1 << 5,
     OBJECT_ARRAY     = 1 << 6,
     OBJECT_MAP       = 1 << 7,
     OBJECT_FUNCTION  = 1 << 8,
@@ -1121,13 +1121,13 @@ typedef struct function {
     bool owns_data;
 } function_t;
 
-typedef object_t (*builtin_fn)(vm_t *vm, void *data, int argc, object_t *args);
+typedef object_t (*native_fn)(vm_t *vm, void *data, int argc, object_t *args);
 
-typedef struct builtin {
+typedef struct native_function {
     char *name;
-    builtin_fn fn;
+    native_fn fn;
     void *data;
-} builtin_t;
+} native_function_t;
 
 typedef void  (*external_data_destroy_fn)(void* data);
 typedef void* (*external_data_copy_fn)(void* data);
@@ -1160,7 +1160,7 @@ typedef struct object_data {
         array(object_t) *array;
         valdict(object_t, object_t) *map;
         function_t function;
-        builtin_t builtin;
+        native_function_t native_function;
         external_data_t external;
     };
     bool gcmark;
@@ -1173,7 +1173,7 @@ APE_INTERNAL object_t object_make_null(void);
 APE_INTERNAL object_t object_make_string(gcmem_t *mem, const char *string);
 APE_INTERNAL object_t object_make_string_no_copy(gcmem_t *mem, char *string);
 APE_INTERNAL object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
-APE_INTERNAL object_t object_make_builtin(gcmem_t *mem, const char *name, builtin_fn fn, void *data);
+APE_INTERNAL object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn fn, void *data);
 APE_INTERNAL object_t object_make_array(gcmem_t *mem);
 APE_INTERNAL object_t object_make_array_with_capacity(gcmem_t *mem, unsigned capacity);
 APE_INTERNAL object_t object_make_array_with_array(gcmem_t *mem, array(object_t) *array);
@@ -1207,7 +1207,7 @@ APE_INTERNAL bool           object_get_bool(object_t obj);
 APE_INTERNAL double         object_get_number(object_t obj);
 APE_INTERNAL function_t*    object_get_function(object_t obj);
 APE_INTERNAL const char*    object_get_string(object_t obj);
-APE_INTERNAL builtin_t*     object_get_builtin(object_t obj);
+APE_INTERNAL native_function_t*     object_get_native_function(object_t obj);
 APE_INTERNAL object_type_t  object_get_type(object_t obj);
 
 APE_INTERNAL bool object_is_numeric(object_t obj);
@@ -1289,7 +1289,7 @@ APE_INTERNAL void gc_enable_on_object(object_t obj);
 typedef struct vm vm_t;
 
 APE_INTERNAL int builtins_count(void);
-APE_INTERNAL builtin_fn builtins_get_fn(int ix);
+APE_INTERNAL native_fn builtins_get_fn(int ix);
 APE_INTERNAL const char* builtins_get_name(int ix);
 
 #endif /* builtins_h */
@@ -1385,7 +1385,7 @@ typedef struct vm {
     gcmem_t *mem;
     object_t globals[VM_MAX_GLOBALS];
     int globals_count;
-    array(object_t) *builtins;
+    array(object_t) *native_functions;
     object_t stack[VM_STACK_SIZE];
     int sp;
     object_t this_stack[VM_THIS_STACK_SIZE];
@@ -5687,7 +5687,7 @@ symbol_table_t *symbol_table_make(symbol_table_t *outer) {
     if (!outer) {
         for (int i = 0; i < builtins_count(); i++) {
             const char *name = builtins_get_name(i);
-            symbol_table_define_builtin(table, name, i);
+            symbol_table_define_native_function(table, name, i);
         }
     }
     return table;
@@ -5748,8 +5748,8 @@ symbol_t *symbol_table_define(symbol_table_t *table, const char *name, bool assi
     return symbol;
 }
 
-symbol_t *symbol_table_define_builtin(symbol_table_t *st, const char *name, int ix) {
-    symbol_t *symbol = symbol_make(name, SYMBOL_BUILTIN, ix, false);
+symbol_t *symbol_table_define_native_function(symbol_table_t *st, const char *name, int ix) {
+    symbol_t *symbol = symbol_make(name, SYMBOL_NATIVE_FUNCTION, ix, false);
     set_symbol(st, symbol);
     return symbol;
 }
@@ -5796,7 +5796,7 @@ symbol_t *symbol_table_resolve(symbol_table_t *table, const char *name) {
 
     if (!symbol && table->outer) {
         symbol = symbol_table_resolve(table->outer, name);
-        if (!symbol || symbol->type == SYMBOL_GLOBAL || symbol->type == SYMBOL_BUILTIN) {
+        if (!symbol || symbol->type == SYMBOL_GLOBAL || symbol->type == SYMBOL_NATIVE_FUNCTION) {
             return symbol;
         }
         symbol = symbol_table_define_free(table, symbol);
@@ -5927,7 +5927,7 @@ static opcode_definition_t g_definitions[OPCODE_MAX + 1] = {
     {"GET_LOCAL", 1, {1}},
     {"DEFINE_LOCAL", 1, {1}},
     {"SET_LOCAL", 1, {1}},
-    {"GET_BUILTIN", 1, {2}},
+    {"GET_NATIVE_FUNCTION", 1, {2}},
     {"FUNCTION", 2, {2, 1}},
     {"GET_FREE", 1, {1}},
     {"SET_FREE", 1, {1}},
@@ -7257,8 +7257,8 @@ static bool last_opcode_is(compiler_t *comp, opcode_t op) {
 static void read_symbol(compiler_t *comp, symbol_t *symbol) {
     if (symbol->type == SYMBOL_GLOBAL) {
         compiler_emit(comp, OPCODE_GET_GLOBAL, 1, (uint64_t[]){symbol->index});
-    } else if (symbol->type == SYMBOL_BUILTIN) {
-        compiler_emit(comp, OPCODE_GET_BUILTIN, 1, (uint64_t[]){symbol->index});
+    } else if (symbol->type == SYMBOL_NATIVE_FUNCTION) {
+        compiler_emit(comp, OPCODE_GET_NATIVE_FUNCTION, 1, (uint64_t[]){symbol->index});
     } else if (symbol->type == SYMBOL_LOCAL) {
         compiler_emit(comp, OPCODE_GET_LOCAL, 1, (uint64_t[]){symbol->index});
     } else if (symbol->type == SYMBOL_FREE) {
@@ -7586,12 +7586,12 @@ object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) {
     return object_make_string_no_copy(mem, res);
 }
 
-object_t object_make_builtin(gcmem_t *mem, const char *name, builtin_fn fn, void *data) {
-    object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_BUILTIN);
-    obj->builtin.name = ape_strdup(name);
-    obj->builtin.fn = fn;
-    obj->builtin.data = data;
-    return object_make(OBJECT_BUILTIN, obj);
+object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn fn, void *data) {
+    object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_NATIVE_FUNCTION);
+    obj->native_function.name = ape_strdup(name);
+    obj->native_function.fn = fn;
+    obj->native_function.data = data;
+    return object_make(OBJECT_NATIVE_FUNCTION, obj);
 }
 
 object_t object_make_array(gcmem_t *mem) {
@@ -7711,8 +7711,8 @@ void object_data_deinit(object_data_t *data) {
             valdict_destroy(data->map);
             break;
         }
-        case OBJECT_BUILTIN: {
-            ape_free(data->builtin.name);
+        case OBJECT_NATIVE_FUNCTION: {
+            ape_free(data->native_function.name);
             break;
         }
         case OBJECT_EXTERNAL: {
@@ -7818,8 +7818,8 @@ void object_to_string(object_t obj, strbuf_t *buf, bool quote_str) {
             strbuf_append(buf, "}");
             break;
         }
-        case OBJECT_BUILTIN: {
-            strbuf_append(buf, "BUILTIN");
+        case OBJECT_NATIVE_FUNCTION: {
+            strbuf_append(buf, "NATIVE_FUNCTION");
             break;
         }
         case OBJECT_EXTERNAL: {
@@ -7844,19 +7844,19 @@ void object_to_string(object_t obj, strbuf_t *buf, bool quote_str) {
 
 const char *object_get_type_name(const object_type_t type) {
     switch (type) {
-        case OBJECT_NONE:     return "NONE";
-        case OBJECT_FREED:    return "NONE";
-        case OBJECT_NUMBER:   return "NUMBER";
-        case OBJECT_BOOL:     return "BOOL";
-        case OBJECT_STRING:   return "STRING";
-        case OBJECT_NULL:     return "NULL";
-        case OBJECT_BUILTIN:  return "BUILTIN";
-        case OBJECT_ARRAY:    return "ARRAY";
-        case OBJECT_MAP:      return "MAP";
-        case OBJECT_FUNCTION: return "FUNCTION";
-        case OBJECT_EXTERNAL: return "EXTERNAL";
-        case OBJECT_ERROR:    return "ERROR";
-        case OBJECT_ANY:      return "ANY";
+        case OBJECT_NONE:            return "NONE";
+        case OBJECT_FREED:           return "NONE";
+        case OBJECT_NUMBER:          return "NUMBER";
+        case OBJECT_BOOL:            return "BOOL";
+        case OBJECT_STRING:          return "STRING";
+        case OBJECT_NULL:            return "NULL";
+        case OBJECT_NATIVE_FUNCTION: return "NATIVE_FUNCTION";
+        case OBJECT_ARRAY:           return "ARRAY";
+        case OBJECT_MAP:             return "MAP";
+        case OBJECT_FUNCTION:        return "FUNCTION";
+        case OBJECT_EXTERNAL:        return "EXTERNAL";
+        case OBJECT_ERROR:           return "ERROR";
+        case OBJECT_ANY:             return "ANY";
     }
     return "NONE";
 }
@@ -7890,7 +7890,7 @@ object_t object_copy(gcmem_t *mem, object_t obj) {
         case OBJECT_BOOL:
         case OBJECT_NULL:
         case OBJECT_FUNCTION:
-        case OBJECT_BUILTIN:
+        case OBJECT_NATIVE_FUNCTION:
         case OBJECT_ERROR: {
             copy = obj;
             break;
@@ -8022,9 +8022,9 @@ function_t* object_get_function(object_t object) {
     return &data->function;
 }
 
-builtin_t* object_get_builtin(object_t obj) {
+native_function_t* object_get_native_function(object_t obj) {
     object_data_t *data = object_get_allocated_data(obj);
-    return &data->builtin;
+    return &data->native_function;
 }
 
 object_type_t object_get_type(object_t obj) {
@@ -8055,7 +8055,7 @@ bool object_is_null(object_t obj) {
 
 bool object_is_callable(object_t obj) {
     object_type_t type = object_get_type(obj);
-    return type == OBJECT_BUILTIN || type == OBJECT_FUNCTION;
+    return type == OBJECT_NATIVE_FUNCTION || type == OBJECT_FUNCTION;
 }
 
 const char* object_get_function_name(object_t obj) {
@@ -8298,7 +8298,7 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
         case OBJECT_NUMBER:
         case OBJECT_BOOL:
         case OBJECT_NULL:
-        case OBJECT_BUILTIN: {
+        case OBJECT_NATIVE_FUNCTION: {
             copy = obj;
             break;
         }
@@ -8640,6 +8640,7 @@ static object_t is_null_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t is_function_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t is_external_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t is_error_fn(vm_t *vm, void *data, int argc, object_t *args);
+static object_t is_native_function_fn(vm_t *vm, void *data, int argc, object_t *args);
 
 // Math
 static object_t sqrt_fn(vm_t *vm, void *data, int argc, object_t *args);
@@ -8664,8 +8665,8 @@ static bool check_args(vm_t *vm, bool generate_error, int argc, object_t *args, 
 
 static struct {
     const char *name;
-    builtin_fn fn;
-} g_builtins[] = {
+    native_fn fn;
+} g_native_functions[] = {
     {"len",         len_fn},
     {"println",     println_fn},
     {"print",       print_fn},
@@ -8699,9 +8700,10 @@ static struct {
     {"is_number",   is_number_fn},
     {"is_bool",     is_bool_fn},
     {"is_null",     is_null_fn},
-    {"is_function",  is_function_fn},
+    {"is_function", is_function_fn},
     {"is_external", is_external_fn},
     {"is_error",    is_error_fn},
+    {"is_native_function", is_native_function_fn},
 
     // Math
     {"sqrt",  sqrt_fn},
@@ -8716,15 +8718,15 @@ static struct {
 };
 
 int builtins_count() {
-    return APE_ARRAY_LEN(g_builtins);
+    return APE_ARRAY_LEN(g_native_functions);
 }
 
-builtin_fn builtins_get_fn(int ix) {
-    return g_builtins[ix].fn;
+native_fn builtins_get_fn(int ix) {
+    return g_native_functions[ix].fn;
 }
 
 const char* builtins_get_name(int ix) {
-    return g_builtins[ix].name;
+    return g_native_functions[ix].name;
 }
 
 // INTERNAL
@@ -9276,6 +9278,14 @@ static object_t is_error_fn(vm_t *vm, void *data, int argc, object_t *args) {
     return object_make_bool(object_get_type(args[0]) == OBJECT_ERROR);
 }
 
+static object_t is_native_function_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_ANY)) {
+        return object_make_null();
+    }
+    return object_make_bool(object_get_type(args[0]) == OBJECT_NATIVE_FUNCTION);
+}
+
 //-----------------------------------------------------------------------------
 // Math
 //-----------------------------------------------------------------------------
@@ -9557,7 +9567,7 @@ static bool push_frame(vm_t *vm, frame_t frame);
 static bool pop_frame(vm_t *vm);
 static void run_gc(vm_t *vm, array(object_t) *constants);
 static bool call_object(vm_t *vm, object_t callee, int num_args);
-static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args);
+static object_t call_native_function(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args);
 static bool check_assign(vm_t *vm, object_t old_value, object_t new_value);
 static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcode_t op, bool *out_overload_found);
 
@@ -9570,15 +9580,15 @@ vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *error
     vm->sp = 0;
     vm->this_sp = 0;
     vm->frames_count = 0;
-    vm->builtins = array_make(object_t);
+    vm->native_functions = array_make(object_t);
     vm->errors = errors;
     vm->runtime_error = NULL;
     vm->last_popped = object_make_null();
     vm->running = false;
 
     for (int i = 0; i < builtins_count(); i++) {
-        object_t builtin = object_make_builtin(vm->mem, builtins_get_name(i), builtins_get_fn(i), vm);
-        array_add(vm->builtins, &builtin);
+        object_t builtin = object_make_native_function(vm->mem, builtins_get_name(i), builtins_get_fn(i), vm);
+        array_add(vm->native_functions, &builtin);
     }
 
     for (int i = 0; i < OPCODE_MAX; i++) {
@@ -9610,7 +9620,7 @@ void vm_destroy(vm_t *vm) {
     if (!vm) {
         return;
     }
-    array_destroy(vm->builtins);
+    array_destroy(vm->native_functions);
     ape_free(vm);
 }
 
@@ -9657,8 +9667,8 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
         APE_ASSERT(vm->sp == old_sp);
         vm->this_sp = old_this_sp;
         return vm_get_last_popped(vm);
-    } else if (type == OBJECT_BUILTIN) {
-        return call_builtin(vm, callee, src_pos_invalid, argc, args);
+    } else if (type == OBJECT_NATIVE_FUNCTION) {
+        return call_native_function(vm, callee, src_pos_invalid, argc, args);
     } else {
         error_t *err = error_make(ERROR_USER, src_pos_invalid, "Object is not callable");
         ptrarray_add(vm->errors, err);
@@ -10088,11 +10098,11 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 stack_push(vm, val);
                 break;
             }
-            case OPCODE_GET_BUILTIN: {
+            case OPCODE_GET_NATIVE_FUNCTION: {
                 uint16_t ix = frame_read_uint16(vm->current_frame);
-                object_t *val = array_get(vm->builtins, ix);
+                object_t *val = array_get(vm->native_functions, ix);
                 if (!val) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Builtin %d not found", ix);
+                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Native function %d not found", ix);
                     vm_set_runtime_error(vm, err);
                     goto err;
                 }
@@ -10463,7 +10473,7 @@ static bool pop_frame(vm_t *vm) {
 
 static void run_gc(vm_t *vm, array(object_t) *constants) {
     gc_unmark_all(vm->mem);
-    gc_mark_objects(array_data(vm->builtins), array_count(vm->builtins));
+    gc_mark_objects(array_data(vm->native_functions), array_count(vm->native_functions));
     gc_mark_objects(array_data(constants), array_count(constants));
     gc_mark_objects(vm->globals, vm->globals_count);
     for (int i = 0; i < vm->frames_count; i++) {
@@ -10496,9 +10506,9 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
             vm_set_runtime_error(vm, err);
             return false;
         }
-    } else if (callee_type == OBJECT_BUILTIN) {
+    } else if (callee_type == OBJECT_NATIVE_FUNCTION) {
         object_t *stack_pos = vm->stack + vm->sp - num_args;
-        object_t res = call_builtin(vm, callee, frame_src_position(vm->current_frame), num_args, stack_pos);
+        object_t res = call_native_function(vm, callee, frame_src_position(vm->current_frame), num_args, stack_pos);
         if (vm_has_errors(vm)) {
             return false;
         }
@@ -10514,8 +10524,8 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
     return true;
 }
 
-static object_t call_builtin(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args) {
-    builtin_t *bn = object_get_builtin(callee);
+static object_t call_native_function(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args) {
+    native_function_t *bn = object_get_native_function(callee);
     object_t res = bn->fn(vm, bn->data, argc, args);
     if (vm->runtime_error != NULL && !APE_STREQ(bn->name, "crash")) {
         error_t *err = vm->runtime_error;
@@ -10606,7 +10616,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 4
+#define APE_IMPL_VERSION_MINOR 5
 #define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
@@ -10627,11 +10637,11 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include "traceback.h"
 #endif
 
-typedef struct builtin_fn_wrapper {
-    ape_builtin_fn fn;
+typedef struct native_fn_wrapper {
+    ape_native_fn fn;
     ape_t *ape;
     void *data;
-} builtin_fn_wrapper_t;
+} native_fn_wrapper_t;
 
 typedef struct ape_program {
     ape_t *ape;
@@ -10643,11 +10653,11 @@ typedef struct ape {
     compiler_t *compiler;
     vm_t *vm;
     ptrarray(ape_error_t) *errors;
-    ptrarray(builtin_fn_wrapper_t) *builtin_fn_wrappers;
+    ptrarray(native_fn_wrapper_t) *native_fn_wrappers;
     ape_config_t config;
 } ape_t;
 
-static object_t ape_builtin_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args);
+static object_t ape_native_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args);
 static object_t ape_object_to_object(ape_object_t obj);
 static ape_object_t object_to_ape_object(object_t obj);
 
@@ -10695,8 +10705,8 @@ ape_t *ape_make(void) {
     if (!ape->vm) {
         goto err;
     }
-    ape->builtin_fn_wrappers = ptrarray_make();
-    if (!ape->builtin_fn_wrappers) {
+    ape->native_fn_wrappers = ptrarray_make();
+    if (!ape->native_fn_wrappers) {
         goto err;
     }
     return ape;
@@ -10712,7 +10722,7 @@ void ape_destroy(ape_t *ape) {
     if (!ape) {
         return;
     }
-    ptrarray_destroy_with_items(ape->builtin_fn_wrappers, ape_free);
+    ptrarray_destroy_with_items(ape->native_fn_wrappers, ape_free);
     ptrarray_destroy_with_items(ape->errors, error_destroy);
     vm_destroy(ape->vm);
     compiler_destroy(ape->compiler);
@@ -10903,18 +10913,18 @@ const ape_error_t* ape_get_error(const ape_t *ape, int index) {
     return ptrarray_get(ape->errors, index);
 }
 
-bool ape_set_builtin(ape_t *ape, const char *name, ape_builtin_fn fn, void *data) {
-    builtin_fn_wrapper_t *wrapper = ape_malloc(sizeof(builtin_fn_wrapper_t));
-    memset(wrapper, 0, sizeof(builtin_fn_wrapper_t));
+bool ape_set_native_function(ape_t *ape, const char *name, ape_native_fn fn, void *data) {
+    native_fn_wrapper_t *wrapper = ape_malloc(sizeof(native_fn_wrapper_t));
+    memset(wrapper, 0, sizeof(native_fn_wrapper_t));
     wrapper->fn = fn;
     wrapper->ape = ape;
     wrapper->data = data;
-    object_t wrapper_builtin = object_make_builtin(ape->mem, name, ape_builtin_fn_wrapper, wrapper);
-    int ix = array_count(ape->vm->builtins);
-    array_add(ape->vm->builtins, &wrapper_builtin);
+    object_t wrapper_native_function = object_make_native_function(ape->mem, name, ape_native_fn_wrapper, wrapper);
+    int ix = array_count(ape->vm->native_functions);
+    array_add(ape->vm->native_functions, &wrapper_native_function);
     symbol_table_t *symbol_table = compiler_get_symbol_table(ape->compiler);
-    symbol_table_define_builtin(symbol_table, name, ix);
-    ptrarray_add(ape->builtin_fn_wrappers, wrapper);
+    symbol_table_define_native_function(symbol_table, name, ix);
+    ptrarray_add(ape->native_fn_wrappers, wrapper);
     return true;
 }
 
@@ -10948,8 +10958,8 @@ ape_object_t ape_get_object(ape_t *ape, const char *name) {
     object_t res = object_make_null();
     if (symbol->type == SYMBOL_GLOBAL) {
         res = vm_get_global(ape->vm, symbol->index);
-    } else if (symbol->type == SYMBOL_BUILTIN) {
-        object_t *res_ptr = array_get(ape->vm->builtins, symbol->index);
+    } else if (symbol->type == SYMBOL_NATIVE_FUNCTION) {
+        object_t *res_ptr = array_get(ape->vm->native_functions, symbol->index);
         res = *res_ptr;
     } else {
         error_t *err = error_makef(ERROR_USER, src_pos_invalid,
@@ -11026,15 +11036,15 @@ ape_object_t ape_object_make_map(ape_t *ape) {
     return object_to_ape_object(object_make_map(ape->mem));
 }
 
-ape_object_t ape_object_make_builtin(ape_t *ape, ape_builtin_fn fn, void *data) {
-    builtin_fn_wrapper_t *wrapper = ape_malloc(sizeof(builtin_fn_wrapper_t));
-    memset(wrapper, 0, sizeof(builtin_fn_wrapper_t));
+ape_object_t ape_object_make_native_function(ape_t *ape, ape_native_fn fn, void *data) {
+    native_fn_wrapper_t *wrapper = ape_malloc(sizeof(native_fn_wrapper_t));
+    memset(wrapper, 0, sizeof(native_fn_wrapper_t));
     wrapper->fn = fn;
     wrapper->ape = ape;
     wrapper->data = data;
-    object_t wrapper_builtin = object_make_builtin(ape->mem, "", ape_builtin_fn_wrapper, wrapper);
-    ptrarray_add(ape->builtin_fn_wrappers, wrapper);
-    return object_to_ape_object(wrapper_builtin);
+    object_t wrapper_native_function = object_make_native_function(ape->mem, "", ape_native_fn_wrapper, wrapper);
+    ptrarray_add(ape->native_fn_wrappers, wrapper);
+    return object_to_ape_object(wrapper_native_function);
 }
 
 ape_object_t ape_object_make_error(ape_t *ape, const char *msg) {
@@ -11117,20 +11127,20 @@ void ape_set_runtime_errorf(ape_t *ape, const char *fmt, ...) {
 ape_object_type_t ape_object_get_type(ape_object_t ape_obj) {
     object_t obj = ape_object_to_object(ape_obj);
     switch (object_get_type(obj)) {
-        case OBJECT_NONE:      return APE_OBJECT_NONE;
-        case OBJECT_ERROR:     return APE_OBJECT_ERROR;
-        case OBJECT_NUMBER:    return APE_OBJECT_NUMBER;
-        case OBJECT_BOOL:      return APE_OBJECT_BOOL;
-        case OBJECT_STRING:    return APE_OBJECT_STRING;
-        case OBJECT_NULL:      return APE_OBJECT_NULL;
-        case OBJECT_BUILTIN:   return APE_OBJECT_BUILTIN;
-        case OBJECT_ARRAY:     return APE_OBJECT_ARRAY;
-        case OBJECT_MAP:       return APE_OBJECT_MAP;
-        case OBJECT_FUNCTION:  return APE_OBJECT_FUNCTION;
-        case OBJECT_EXTERNAL:  return APE_OBJECT_EXTERNAL;
-        case OBJECT_FREED:     return APE_OBJECT_FREED;
-        case OBJECT_ANY:       return APE_OBJECT_ANY;
-        default:               return APE_OBJECT_NONE;
+        case OBJECT_NONE:            return APE_OBJECT_NONE;
+        case OBJECT_ERROR:           return APE_OBJECT_ERROR;
+        case OBJECT_NUMBER:          return APE_OBJECT_NUMBER;
+        case OBJECT_BOOL:            return APE_OBJECT_BOOL;
+        case OBJECT_STRING:          return APE_OBJECT_STRING;
+        case OBJECT_NULL:            return APE_OBJECT_NULL;
+        case OBJECT_NATIVE_FUNCTION: return APE_OBJECT_NATIVE_FUNCTION;
+        case OBJECT_ARRAY:           return APE_OBJECT_ARRAY;
+        case OBJECT_MAP:             return APE_OBJECT_MAP;
+        case OBJECT_FUNCTION:        return APE_OBJECT_FUNCTION;
+        case OBJECT_EXTERNAL:        return APE_OBJECT_EXTERNAL;
+        case OBJECT_FREED:           return APE_OBJECT_FREED;
+        case OBJECT_ANY:             return APE_OBJECT_ANY;
+        default:                     return APE_OBJECT_NONE;
     }
 }
 
@@ -11140,20 +11150,20 @@ const char* ape_object_get_type_string(ape_object_t obj) {
 
 const char* ape_object_get_type_name(ape_object_type_t type) {
     switch (type) {
-        case APE_OBJECT_NONE:      return "NONE";
-        case APE_OBJECT_ERROR:     return "ERROR";
-        case APE_OBJECT_NUMBER:    return "NUMBER";
-        case APE_OBJECT_BOOL:      return "BOOL";
-        case APE_OBJECT_STRING:    return "STRING";
-        case APE_OBJECT_NULL:      return "NULL";
-        case APE_OBJECT_BUILTIN:   return "BUILTIN";
-        case APE_OBJECT_ARRAY:     return "ARRAY";
-        case APE_OBJECT_MAP:       return "MAP";
-        case APE_OBJECT_FUNCTION:  return "FUNCTION";
-        case APE_OBJECT_EXTERNAL:  return "EXTERNAL";
-        case APE_OBJECT_FREED:     return "FREED";
-        case APE_OBJECT_ANY:       return "ANY";
-        default:                   return "NONE";
+        case APE_OBJECT_NONE:            return "NONE";
+        case APE_OBJECT_ERROR:           return "ERROR";
+        case APE_OBJECT_NUMBER:          return "NUMBER";
+        case APE_OBJECT_BOOL:            return "BOOL";
+        case APE_OBJECT_STRING:          return "STRING";
+        case APE_OBJECT_NULL:            return "NULL";
+        case APE_OBJECT_NATIVE_FUNCTION: return "NATIVE_FUNCTION";
+        case APE_OBJECT_ARRAY:           return "ARRAY";
+        case APE_OBJECT_MAP:             return "MAP";
+        case APE_OBJECT_FUNCTION:        return "FUNCTION";
+        case APE_OBJECT_EXTERNAL:        return "EXTERNAL";
+        case APE_OBJECT_FREED:           return "FREED";
+        case APE_OBJECT_ANY:             return "ANY";
+        default:                         return "NONE";
     }
 }
 
@@ -11519,8 +11529,8 @@ const char* ape_traceback_get_function_name(const ape_traceback_t *ape_traceback
 // Ape internal
 //-----------------------------------------------------------------------------
 
-static object_t ape_builtin_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args) {
-    builtin_fn_wrapper_t *wrapper = (builtin_fn_wrapper_t*)data;
+static object_t ape_native_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args) {
+    native_fn_wrapper_t *wrapper = (native_fn_wrapper_t*)data;
     APE_ASSERT(vm == wrapper->ape->vm);
     ape_object_t res = wrapper->fn(wrapper->ape, wrapper->data, argc, (ape_object_t*)args);
     if (ape_has_errors(wrapper->ape)) {
