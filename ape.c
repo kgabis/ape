@@ -7562,13 +7562,15 @@ object_t object_make_string_no_copy(gcmem_t *mem, char *string) {
     int len = (int)strlen(string);
     if ((len + 1) < OBJECT_STRING_BUF_SIZE) {
         memcpy(obj->string.value_buf, string, len + 1);
-        ape_free(string);
         obj->string.is_allocated = false;
+        obj->string.hash = object_hash_string(string);
+        ape_free(string);
+        string = NULL;
     } else {
         obj->string.value_allocated = string;
         obj->string.is_allocated = true;
+        obj->string.hash = object_hash_string(string);
     }
-    obj->string.hash = object_hash_string(string);
     return object_make(OBJECT_STRING, obj);
 }
 
@@ -9089,7 +9091,7 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
         for (int i = 0; i < arg_str_len; i++) {
             res_buf[len + i] = arg_str[i];
         }
-        res_buf[len + arg_str_len + 1] = '\0';
+        res_buf[len + arg_str_len] = '\0';
         return object_make_string_no_copy(vm->mem, res_buf);
     }
     return object_make_null();
@@ -10617,7 +10619,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 5
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\

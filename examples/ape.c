@@ -4,11 +4,18 @@
 #include "ape.h"
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        printf("Usage: %s FILE\n", argv[0]);
+    if (argc < 2) {
+        printf("Usage: %s FILE [APE_ARGS]\n", argv[0]);
         return 1;
     }
     ape_t *ape = ape_make();
+
+    ape_object_t args_array = ape_object_make_array(ape);
+    for (int i = 1; i < argc; i++) {
+        ape_object_add_array_string(args_array, argv[i]);
+    }
+    ape_set_global_constant(ape, "args", args_array);
+
     ape_execute_file(ape, argv[1]);
     bool ok = !ape_has_errors(ape);
     if (!ok) {
