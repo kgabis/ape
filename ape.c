@@ -997,6 +997,20 @@ APE_INTERNAL void compilation_result_destroy(compilation_result_t* res);
 
 #endif /* compilation_scope_h */
 //FILE_END
+//FILE_START:optimisation.h
+#ifndef optimisation_h
+#define optimisation_h
+
+
+#ifndef APE_AMALGAMATED
+#include "common.h"
+#include "parser.h"
+#endif
+
+APE_INTERNAL expression_t* optimise_expression(const expression_t* expr);
+
+#endif /* optimisation_h */
+//FILE_END
 //FILE_START:compiler.h
 #ifndef compiler_h
 #define compiler_h
@@ -6153,6 +6167,106 @@ void compilation_result_destroy(compilation_result_t *res) {
     ape_free(res);
 }
 //FILE_END
+//FILE_START:optimisation.c
+#ifndef APE_AMALGAMATED
+#include "optimisation.h"
+#endif
+
+static expression_t* optimise_infix_expression(const expression_t* expr);
+static expression_t* optimise_prefix_expression(const expression_t* expr);
+
+expression_t* optimise_expression(const expression_t* expr) {
+    switch (expr->type) {
+        case EXPRESSION_INFIX: return optimise_infix_expression(expr);
+        case EXPRESSION_PREFIX: return optimise_prefix_expression(expr);
+        default: return NULL;
+    }
+}
+
+// INTERNAL
+static expression_t* optimise_infix_expression(const expression_t* expr) {
+    const expression_t *left = expr->infix.left;
+    expression_t *left_optimised = optimise_expression(left);
+    if (left_optimised) {
+        left = left_optimised;
+    }
+
+    const expression_t *right = expr->infix.right;
+    expression_t *right_optimised = optimise_expression(right);
+    if (right_optimised) {
+        right = right_optimised;
+    }
+
+    expression_t *res = NULL;
+
+    bool left_is_numeric = left->type == EXPRESSION_NUMBER_LITERAL || left->type == EXPRESSION_BOOL_LITERAL;
+    bool right_is_numeric = right->type == EXPRESSION_NUMBER_LITERAL || right->type == EXPRESSION_BOOL_LITERAL;
+
+    bool left_is_string = left->type == EXPRESSION_STRING_LITERAL;
+    bool right_is_string = right->type == EXPRESSION_STRING_LITERAL;
+
+    if (left_is_numeric && right_is_numeric) {
+        double left_val = left->type == EXPRESSION_NUMBER_LITERAL ? left->number_literal : left->bool_literal;
+        double right_val = right->type == EXPRESSION_NUMBER_LITERAL ? right->number_literal : right->bool_literal;
+        int64_t left_val_int = left_val;
+        int64_t right_val_int = right_val;
+        switch (expr->infix.op) {
+            case OPERATOR_PLUS:     { res = expression_make_number_literal(left_val + right_val); break; }
+            case OPERATOR_MINUS:    { res = expression_make_number_literal(left_val - right_val); break; }
+            case OPERATOR_ASTERISK: { res = expression_make_number_literal(left_val * right_val); break; }
+            case OPERATOR_SLASH:    { res = expression_make_number_literal(left_val / right_val); break; }
+            case OPERATOR_LT:       { res = expression_make_bool_literal(left_val < right_val); break; }
+            case OPERATOR_LTE:      { res = expression_make_bool_literal(left_val <= right_val); break; }
+            case OPERATOR_GT:       { res = expression_make_bool_literal(left_val > right_val); break; }
+            case OPERATOR_GTE:      { res = expression_make_bool_literal(left_val >= right_val); break; }
+            case OPERATOR_EQ:       { res = expression_make_bool_literal(APE_DBLEQ(left_val, right_val)); break; }
+            case OPERATOR_NOT_EQ:   { res = expression_make_bool_literal(!APE_DBLEQ(left_val, right_val)); break; }
+            case OPERATOR_MODULUS:  { res = expression_make_number_literal(fmod(left_val, right_val)); break; }
+            case OPERATOR_BIT_AND:  { res = expression_make_number_literal(left_val_int & right_val_int); break; }
+            case OPERATOR_BIT_OR:   { res = expression_make_number_literal(left_val_int | right_val_int); break; }
+            case OPERATOR_BIT_XOR:  { res = expression_make_number_literal(left_val_int ^ right_val_int); break; }
+            case OPERATOR_LSHIFT:   { res = expression_make_number_literal(left_val_int << right_val_int); break; }
+            case OPERATOR_RSHIFT:   { res = expression_make_number_literal(left_val_int >> right_val_int); break; }
+            default: {
+                break;
+            }
+        }
+    } else if (expr->infix.op == OPERATOR_PLUS && left_is_string && right_is_string) {
+        const char* left_val = left->string_literal;
+        const char* right_val = right->string_literal;
+        char *res_str = ape_stringf("%s%s", left_val, right_val);
+        res = expression_make_string_literal(res_str);
+    }
+
+    expression_destroy(left_optimised);
+    expression_destroy(right_optimised);
+
+    if (res) {
+        res->pos = expr->pos;
+    }
+
+    return res;
+}
+
+expression_t* optimise_prefix_expression(const expression_t* expr) {
+    const expression_t *right = expr->prefix.right;
+    expression_t *right_optimised = optimise_expression(right);
+    if (right_optimised) {
+        right = right_optimised;
+    }
+    expression_t *res = NULL;
+    if (expr->prefix.op == OPERATOR_MINUS && right->type == EXPRESSION_NUMBER_LITERAL) {
+        res = expression_make_number_literal(-right->number_literal);
+    } else if (expr->prefix.op == OPERATOR_BANG && right->type == EXPRESSION_BOOL_LITERAL) {
+        res = expression_make_bool_literal(!right->bool_literal);
+    }
+    expression_destroy(right_optimised);
+    if (res) {
+        res->pos = expr->pos;
+    }
+    return res;
+}
+//FILE_END
 //FILE_START:compiler.c
 #include <stdlib.h>
 #include <math.h>
@@ -6167,6 +6281,7 @@ void compilation_result_destroy(compilation_result_t *res) {
 #include "code.h"
 #include "symbol_table.h"
 #include "error.h"
+#include "optimisation.h"
 #endif
 
 static bool compile_code(compiler_t *comp, const char *code);
@@ -6569,8 +6684,11 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
                     return false;
                 }
 
-                int jump_to_end_ip = compiler_emit(comp, OPCODE_JUMP, 1, (uint64_t[]){0xbeef});
-                array_add(jump_to_end_ips, &jump_to_end_ip);
+                // don't emit jump for the last statement
+                if (i < (ptrarray_count(if_stmt->cases) - 1) || if_stmt->alternative) {
+                    int jump_to_end_ip = compiler_emit(comp, OPCODE_JUMP, 1, (uint64_t[]){0xbeef});
+                    array_add(jump_to_end_ips, &jump_to_end_ip);
+                }
 
                 int after_elif_ip = get_ip(comp);
                 change_uint16_operand(comp, next_case_jump_ip + 1, after_elif_ip);
@@ -6754,14 +6872,15 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
             symbol_table_push_block_scope(symbol_table);
 
             // Init
+            int jump_to_after_update_ip = 0;
             bool ok = false;
             if (loop->init) {
                 ok = compile_statement(comp, loop->init);
                 if (!ok) {
                     return false;
                 }
+                jump_to_after_update_ip = compiler_emit(comp, OPCODE_JUMP, 1, (uint64_t[]){0xbeef});
             }
-            int jump_to_after_update_ip = compiler_emit(comp, OPCODE_JUMP, 1, (uint64_t[]){0xbeef});
 
             // Update
             int update_ip = get_ip(comp);
@@ -6772,8 +6891,11 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
                 }
                 compiler_emit(comp, OPCODE_POP, 0, NULL);
             }
-            int after_update_ip = get_ip(comp);
-            change_uint16_operand(comp, jump_to_after_update_ip + 1, after_update_ip);
+
+            if (loop->init) {
+                int after_update_ip = get_ip(comp);
+                change_uint16_operand(comp, jump_to_after_update_ip + 1, after_update_ip);
+            }
 
             // Test
             if (loop->test) {
@@ -6881,9 +7003,17 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
 
 static bool compile_expression(compiler_t *comp, const expression_t *expr) {
     bool ok = false;
+
+    expression_t *expr_optimised = optimise_expression(expr);
+    if (expr_optimised) {
+        expr = expr_optimised;
+    }
+
     array_push(comp->src_positions_stack, &expr->pos);
     compilation_scope_t *compilation_scope = compiler_get_compilation_scope(comp);
     symbol_table_t *symbol_table = compiler_get_symbol_table(comp);
+
+    bool res = false;
 
     switch (expr->type) {
         case EXPRESSION_INFIX: {
@@ -6891,26 +7021,26 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
             opcode_t op = OPCODE_NONE;
             switch (expr->infix.op) {
-                case OPERATOR_PLUS:        op = OPCODE_ADD; break;
-                case OPERATOR_MINUS:       op = OPCODE_SUB; break;
-                case OPERATOR_ASTERISK:    op = OPCODE_MUL; break;
-                case OPERATOR_SLASH:       op = OPCODE_DIV; break;
-                case OPERATOR_MODULUS:     op = OPCODE_MOD; break;
-                case OPERATOR_EQ:          op = OPCODE_EQUAL; break;
-                case OPERATOR_NOT_EQ:      op = OPCODE_NOT_EQUAL; break;
-                case OPERATOR_GT:          op = OPCODE_GREATER_THAN; break;
-                case OPERATOR_GTE:         op = OPCODE_GREATER_THAN_EQUAL; break;
-                case OPERATOR_LT:          op = OPCODE_GREATER_THAN; rearrange = true; break;
-                case OPERATOR_LTE:         op = OPCODE_GREATER_THAN_EQUAL; rearrange = true; break;
-                case OPERATOR_BIT_OR:      op = OPCODE_OR; break;
-                case OPERATOR_BIT_XOR:     op = OPCODE_XOR; break;
-                case OPERATOR_BIT_AND:     op = OPCODE_AND; break;
-                case OPERATOR_LSHIFT:      op = OPCODE_LSHIFT; break;
-                case OPERATOR_RSHIFT:      op = OPCODE_RSHIFT; break;
+                case OPERATOR_PLUS:     op = OPCODE_ADD; break;
+                case OPERATOR_MINUS:    op = OPCODE_SUB; break;
+                case OPERATOR_ASTERISK: op = OPCODE_MUL; break;
+                case OPERATOR_SLASH:    op = OPCODE_DIV; break;
+                case OPERATOR_MODULUS:  op = OPCODE_MOD; break;
+                case OPERATOR_EQ:       op = OPCODE_EQUAL; break;
+                case OPERATOR_NOT_EQ:   op = OPCODE_NOT_EQUAL; break;
+                case OPERATOR_GT:       op = OPCODE_GREATER_THAN; break;
+                case OPERATOR_GTE:      op = OPCODE_GREATER_THAN_EQUAL; break;
+                case OPERATOR_LT:       op = OPCODE_GREATER_THAN; rearrange = true; break;
+                case OPERATOR_LTE:      op = OPCODE_GREATER_THAN_EQUAL; rearrange = true; break;
+                case OPERATOR_BIT_OR:   op = OPCODE_OR; break;
+                case OPERATOR_BIT_XOR:  op = OPCODE_XOR; break;
+                case OPERATOR_BIT_AND:  op = OPCODE_AND; break;
+                case OPERATOR_LSHIFT:   op = OPCODE_LSHIFT; break;
+                case OPERATOR_RSHIFT:   op = OPCODE_RSHIFT; break;
                 default: {
                     error_t *err = error_makef(ERROR_COMPILATION, expr->pos, "Unknown infix operator");
                     ptrarray_add(comp->errors, err);
-                    return false;
+                    goto error;
                 }
             }
 
@@ -6919,12 +7049,12 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
             ok = compile_expression(comp, left);
             if (!ok) {
-                return false;
+                goto error;
             }
 
             ok = compile_expression(comp, right);
             if (!ok) {
-                return false;
+                goto error;
             }
 
             if (is_comparison(expr->infix.op)) {
@@ -6958,7 +7088,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             for (int i = 0; i < ptrarray_count(expr->array); i++) {
                 ok = compile_expression(comp, ptrarray_get(expr->array, i));
                 if (!ok) {
-                    return false;
+                    goto error;
                 }
             }
             compiler_emit(comp, OPCODE_ARRAY, 1, (uint64_t[]){ptrarray_count(expr->array)});
@@ -6974,12 +7104,12 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
                 ok = compile_expression(comp, key);
                 if (!ok) {
-                    return false;
+                    goto error;
                 }
 
                 ok = compile_expression(comp, val);
                 if (!ok) {
-                    return false;
+                    goto error;
                 }
             }
             compiler_emit(comp, OPCODE_MAP_END, 1, (uint64_t[]){len * 2});
@@ -6988,7 +7118,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
         case EXPRESSION_PREFIX: {
             ok = compile_expression(comp, expr->prefix.right);
             if (!ok) {
-                return false;
+                goto error;
             }
             opcode_t op = OPCODE_NONE;
             switch (expr->prefix.op) {
@@ -6997,7 +7127,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 default: {
                     error_t *err = error_makef(ERROR_COMPILATION, expr->pos, "Unknown prefix operator.");
                     ptrarray_add(comp->errors, err);
-                    return false;
+                    goto error;
                 }
             }
             compiler_emit(comp, op, 0, NULL);
@@ -7010,7 +7140,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 error_t *err = error_makef(ERROR_COMPILATION, ident->pos,
                                            "Symbol \"%s\" could not be resolved", ident->value);
                 ptrarray_add(comp->errors, err);
-                return false;
+                goto error;
             }
             read_symbol(comp, symbol);
             break;
@@ -7019,11 +7149,11 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             const index_expression_t *index = &expr->index_expr;
             ok = compile_expression(comp, index->left);
             if (!ok) {
-                return false;
+                goto error;
             }
             ok = compile_expression(comp, index->index);
             if (!ok) {
-                return false;
+                goto error;
             }
             compiler_emit(comp, OPCODE_GET_INDEX, 0, NULL);
             break;
@@ -7042,7 +7172,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                     error_t *err = error_makef(ERROR_COMPILATION, expr->pos,
                                                "Cannot define symbol \"%s\"", fn->name);
                     ptrarray_add(comp->errors, err);
-                    return false;
+                    goto error;
                 }
             }
 
@@ -7050,20 +7180,20 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             if (!this_symbol) {
                 error_t *err = error_make(ERROR_COMPILATION, expr->pos, "Cannot define \"this\" symbol");
                 ptrarray_add(comp->errors, err);
-                return false;
+                goto error;
             }
 
             for (int i = 0; i < array_count(expr->fn_literal.params); i++) {
                 ident_t *param = array_get(expr->fn_literal.params, i);
                 symbol_t *param_symbol = define_symbol(comp, param->pos, param->value, true, false);
                 if (!param_symbol) {
-                    return false;
+                    goto error;
                 }
             }
 
             ok = compile_statements(comp, fn->body->statements);
             if (!ok) {
-                return false;
+                goto error;
             }
         
             if (!last_opcode_is(comp, OPCODE_RETURN_VALUE) && !last_opcode_is(comp, OPCODE_RETURN)) {
@@ -7099,14 +7229,14 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
         case EXPRESSION_CALL: {
             ok = compile_expression(comp, expr->call_expr.function);
             if (!ok) {
-                return false;
+                goto error;
             }
 
             for (int i = 0; i < ptrarray_count(expr->call_expr.args); i++) {
                 const expression_t *arg_expr = ptrarray_get(expr->call_expr.args, i);
                 ok = compile_expression(comp, arg_expr);
                 if (!ok) {
-                    return false;
+                    goto error;
                 }
             }
 
@@ -7119,12 +7249,12 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
                                           "Expression is not assignable.");
                 ptrarray_add(comp->errors, err);
-                return false;
+                goto error;
             }
 
             ok = compile_expression(comp, assign->source);
             if (!ok) {
-                return false;
+                goto error;
             }
 
             compiler_emit(comp, OPCODE_DUP, 0, NULL);
@@ -7137,24 +7267,24 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                     error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
                                               "Symbol \"%s\" could not be resolved", ident->value);
                     ptrarray_add(comp->errors, err);
-                    return false;
+                    goto error;
                 }
                 if (!symbol->assignable) {
                     error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
                                               "Symbol \"%s\" is not assignable", ident->value);
                     ptrarray_add(comp->errors, err);
-                    return false;
+                    goto error;
                 }
                 write_symbol(comp, symbol, false);
             } else if (assign->dest->type == EXPRESSION_INDEX) {
                 const index_expression_t *index = &assign->dest->index_expr;
                 ok = compile_expression(comp, index->left);
                 if (!ok) {
-                    return false;
+                    goto error;
                 }
                 ok = compile_expression(comp, index->index);
                 if (!ok) {
-                    return false;
+                    goto error;
                 }
                 compiler_emit(comp, OPCODE_SET_INDEX, 0, NULL);
             }
@@ -7166,7 +7296,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
             ok = compile_expression(comp, logi->left);
             if (!ok) {
-                return false;
+                goto error;
             }
 
             compiler_emit(comp, OPCODE_DUP, 0, NULL);
@@ -7182,7 +7312,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
             ok = compile_expression(comp, logi->right);
             if (!ok) {
-                return false;
+                goto error;
             }
 
             int after_right_ip = get_ip(comp);
@@ -7195,8 +7325,14 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             break;
         }
     }
+    res = true;
+    goto end;
+error:
+    res = false;
+end:
     array_pop(comp->src_positions_stack, NULL);
-    return true;
+    expression_destroy(expr_optimised);
+    return res;
 }
 
 static bool compile_code_block(compiler_t *comp, const code_block_t *block) {
@@ -10618,8 +10754,8 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 5
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_MINOR 6
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
