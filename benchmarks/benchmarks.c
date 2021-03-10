@@ -20,6 +20,7 @@ int main(int argc, char *argv[]) {
 #else
     int benchmarks_main() {
         const char *tests[] = {
+            "mergesort.bn",
             "raytracer_profile.bn",
             "raytracer_profile_optimised.bn",
             "primes.bn",
@@ -49,8 +50,6 @@ int main(int argc, char *argv[]) {
 
 static bool execute_file(const char *filename, bool must_succeed) {
     ape_t *ape = ape_make();
-
-    ape_set_gc_interval(ape, 10000);
 
     ape_program_t *program = ape_compile_file(ape, filename);
     if (!program || ape_has_errors(ape)) {

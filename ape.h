@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT
 
 ape
 https://github.com/kgabis/ape
-Copyright (c) 2020 Krzysztof Gabis
+Copyright (c) 2021 Krzysztof Gabis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -44,10 +44,10 @@ extern "C"
 #endif
 
 #define APE_VERSION_MAJOR 0
-#define APE_VERSION_MINOR 6
+#define APE_VERSION_MINOR 7
 #define APE_VERSION_PATCH 0
 
-#define APE_VERSION_STRING "0.6.0"
+#define APE_VERSION_STRING "0.7.0"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
@@ -98,10 +98,6 @@ ape_t* ape_make(void);
 void   ape_destroy(ape_t *ape);
 
 void ape_set_repl_mode(ape_t *ape, bool enabled);
-
-// Number of bytecode instructions executed before invoking garbage collection.
-// Set to -1 to disable GC.
-void ape_set_gc_interval(ape_t *ape, int interval);
 
 void ape_set_stdout_write_function(ape_t *ape, ape_stdout_write_fn stdout_write, void *context);
 void ape_set_file_write_function(ape_t *ape, ape_write_file_fn file_write, void *context);

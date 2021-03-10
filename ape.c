@@ -61,10 +61,10 @@ THE SOFTWARE.
 #endif
 
 #ifdef APE_AMALGAMATED
-#define COLLECTIONS_AMALGAMATED
-#define APE_INTERNAL static
+    #define COLLECTIONS_AMALGAMATED
+    #define APE_INTERNAL static
 #else
-#define APE_INTERNAL
+    #define APE_INTERNAL
 #endif
 
 typedef struct compiled_file compiled_file_t;
@@ -98,8 +98,6 @@ typedef struct ape_config {
         } write_file;
     } fileio;
 
-    int gc_interval;
-
     bool repl_mode; // allows redefinition of symbols
 } ape_config_t;
 
@@ -124,7 +122,7 @@ extern ape_free_fn ape_free;
 //FILE_END
 //FILE_START:collections.h
 /*
-Copyright (c) 2020 Krzysztof Gabis
+Copyright (c) 2021 Krzysztof Gabis
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -207,19 +205,20 @@ typedef struct valdict_ valdict_t_;
 
 #define valdict_make(key_type, val_type) valdict_make_(sizeof(key_type), sizeof(val_type))
 
-COLLECTIONS_API valdict_t_* valdict_make_(size_t key_size, size_t val_size);
-COLLECTIONS_API valdict_t_* valdict_make_with_capacity(unsigned int min_capacity, size_t key_size, size_t val_size);
-COLLECTIONS_API void        valdict_destroy(valdict_t_ *dict);
-COLLECTIONS_API void        valdict_set_hash_function(valdict_t_ *dict, collections_hash_fn hash_fn);
-COLLECTIONS_API void        valdict_set_equals_function(valdict_t_ *dict, collections_equals_fn equals_fn);
-COLLECTIONS_API bool        valdict_set(valdict_t_ *dict, void *key, void *value);
-COLLECTIONS_API void *      valdict_get(const valdict_t_ *dict, const void *key);
-COLLECTIONS_API void *      valdict_get_key_at(const valdict_t_ *dict, unsigned int ix);
-COLLECTIONS_API void *      valdict_get_value_at(const valdict_t_ *dict, unsigned int ix);
-COLLECTIONS_API bool        valdict_set_value_at(const valdict_t_ *dict, unsigned int ix, const void *value);
-COLLECTIONS_API int         valdict_count(const valdict_t_ *dict);
-COLLECTIONS_API bool        valdict_remove(valdict_t_ *dict, void *key);
-COLLECTIONS_API void        valdict_clear(valdict_t_ *dict);
+COLLECTIONS_API valdict_t_*  valdict_make_(size_t key_size, size_t val_size);
+COLLECTIONS_API valdict_t_*  valdict_make_with_capacity(unsigned int min_capacity, size_t key_size, size_t val_size);
+COLLECTIONS_API void         valdict_destroy(valdict_t_ *dict);
+COLLECTIONS_API void         valdict_set_hash_function(valdict_t_ *dict, collections_hash_fn hash_fn);
+COLLECTIONS_API void         valdict_set_equals_function(valdict_t_ *dict, collections_equals_fn equals_fn);
+COLLECTIONS_API bool         valdict_set(valdict_t_ *dict, void *key, void *value);
+COLLECTIONS_API void *       valdict_get(const valdict_t_ *dict, const void *key);
+COLLECTIONS_API void *       valdict_get_key_at(const valdict_t_ *dict, unsigned int ix);
+COLLECTIONS_API void *       valdict_get_value_at(const valdict_t_ *dict, unsigned int ix);
+COLLECTIONS_API unsigned int valdict_get_capacity(const valdict_t_ *dict);
+COLLECTIONS_API bool         valdict_set_value_at(const valdict_t_ *dict, unsigned int ix, const void *value);
+COLLECTIONS_API int          valdict_count(const valdict_t_ *dict);
+COLLECTIONS_API bool         valdict_remove(valdict_t_ *dict, void *key);
+COLLECTIONS_API void         valdict_clear(valdict_t_ *dict);
 
 //-----------------------------------------------------------------------------
 // Pointer dictionary
@@ -254,33 +253,34 @@ typedef void (*array_item_deinit_fn)(void* item);
 #define array_destroy_with_items(arr, fn) array_destroy_with_items_(arr, (array_item_deinit_fn)(fn))
 #define array_clear_and_deinit_items(arr, fn) array_clear_and_deinit_items_(arr, (array_item_deinit_fn)(fn))
 
-COLLECTIONS_API array_t_*   array_make_(size_t element_size);
-COLLECTIONS_API array_t_*   array_make_with_capacity(unsigned int capacity, size_t element_size);
-COLLECTIONS_API void        array_destroy(array_t_ *arr);
-COLLECTIONS_API void        array_destroy_with_items_(array_t_ *arr, array_item_deinit_fn deinit_fn);
-COLLECTIONS_API array_t_*   array_copy(const array_t_ *arr);
-COLLECTIONS_API bool        array_add(array_t_ *arr, const void *value);
-COLLECTIONS_API bool        array_addn(array_t_ *arr, const void *values, int n);
-COLLECTIONS_API bool        array_add_array(array_t_ *dest, const array_t_ *source);
-COLLECTIONS_API bool        array_push(array_t_ *arr, const void *value);
-COLLECTIONS_API bool        array_pop(array_t_ *arr, void *out_value);
-COLLECTIONS_API void *      array_top(array_t_ *arr);
-COLLECTIONS_API bool        array_set(array_t_ *arr, unsigned int ix, void *value);
-COLLECTIONS_API bool        array_setn(array_t_ *arr, unsigned int ix, void *values, int n);
-COLLECTIONS_API void *      array_get(const array_t_ *arr, unsigned int ix);
-COLLECTIONS_API void *      array_get_last(const array_t_ *arr);
-COLLECTIONS_API int         array_count(const array_t_ *arr);
-COLLECTIONS_API bool        array_remove_at(array_t_ *arr, unsigned int ix);
-COLLECTIONS_API bool        array_remove_item(array_t_ *arr, void *ptr);
-COLLECTIONS_API void        array_clear(array_t_ *arr);
-COLLECTIONS_API void        array_clear_and_deinit_items_(array_t_ *arr, array_item_deinit_fn deinit_fn);
-COLLECTIONS_API void        array_lock_capacity(array_t_ *arr);
-COLLECTIONS_API int         array_get_index(const array_t_ *arr, void *ptr);
-COLLECTIONS_API bool        array_contains(const array_t_ *arr, void *ptr);
-COLLECTIONS_API void*       array_data(array_t_ *arr);
-COLLECTIONS_API const void* array_const_data(const array_t_ *arr);
-COLLECTIONS_API bool        array_orphan_data(array_t_ *arr);
-COLLECTIONS_API void        array_reverse(array_t_ *arr);
+COLLECTIONS_API array_t_*    array_make_(size_t element_size);
+COLLECTIONS_API array_t_*    array_make_with_capacity(unsigned int capacity, size_t element_size);
+COLLECTIONS_API void         array_destroy(array_t_ *arr);
+COLLECTIONS_API void         array_destroy_with_items_(array_t_ *arr, array_item_deinit_fn deinit_fn);
+COLLECTIONS_API array_t_*    array_copy(const array_t_ *arr);
+COLLECTIONS_API bool         array_add(array_t_ *arr, const void *value);
+COLLECTIONS_API bool         array_addn(array_t_ *arr, const void *values, int n);
+COLLECTIONS_API bool         array_add_array(array_t_ *dest, const array_t_ *source);
+COLLECTIONS_API bool         array_push(array_t_ *arr, const void *value);
+COLLECTIONS_API bool         array_pop(array_t_ *arr, void *out_value);
+COLLECTIONS_API void *       array_top(array_t_ *arr);
+COLLECTIONS_API bool         array_set(array_t_ *arr, unsigned int ix, void *value);
+COLLECTIONS_API bool         array_setn(array_t_ *arr, unsigned int ix, void *values, int n);
+COLLECTIONS_API void *       array_get(const array_t_ *arr, unsigned int ix);
+COLLECTIONS_API void *       array_get_last(const array_t_ *arr);
+COLLECTIONS_API int          array_count(const array_t_ *arr);
+COLLECTIONS_API unsigned int array_get_capacity(const array_t_ *arr);
+COLLECTIONS_API bool         array_remove_at(array_t_ *arr, unsigned int ix);
+COLLECTIONS_API bool         array_remove_item(array_t_ *arr, void *ptr);
+COLLECTIONS_API void         array_clear(array_t_ *arr);
+COLLECTIONS_API void         array_clear_and_deinit_items_(array_t_ *arr, array_item_deinit_fn deinit_fn);
+COLLECTIONS_API void         array_lock_capacity(array_t_ *arr);
+COLLECTIONS_API int          array_get_index(const array_t_ *arr, void *ptr);
+COLLECTIONS_API bool         array_contains(const array_t_ *arr, void *ptr);
+COLLECTIONS_API void*        array_data(array_t_ *arr);
+COLLECTIONS_API const void*  array_const_data(const array_t_ *arr);
+COLLECTIONS_API bool         array_orphan_data(array_t_ *arr);
+COLLECTIONS_API void         array_reverse(array_t_ *arr);
 
 //-----------------------------------------------------------------------------
 // Pointer Array
@@ -1103,7 +1103,7 @@ typedef enum {
     OBJECT_BOOL      = 1 << 2,
     OBJECT_STRING    = 1 << 3,
     OBJECT_NULL      = 1 << 4,
-    OBJECT_NATIVE_FUNCTION   = 1 << 5,
+    OBJECT_NATIVE_FUNCTION = 1 << 5,
     OBJECT_ARRAY     = 1 << 6,
     OBJECT_MAP       = 1 << 7,
     OBJECT_FUNCTION  = 1 << 8,
@@ -1181,6 +1181,7 @@ typedef struct object_data {
     object_type_t type;
 } object_data_t;
 
+APE_INTERNAL object_t object_make_from_data(object_type_t type, object_data_t *data);
 APE_INTERNAL object_t object_make_number(double val);
 APE_INTERNAL object_t object_make_bool(bool val);
 APE_INTERNAL object_t object_make_null(void);
@@ -1190,7 +1191,6 @@ APE_INTERNAL object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) __
 APE_INTERNAL object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn fn, void *data);
 APE_INTERNAL object_t object_make_array(gcmem_t *mem);
 APE_INTERNAL object_t object_make_array_with_capacity(gcmem_t *mem, unsigned capacity);
-APE_INTERNAL object_t object_make_array_with_array(gcmem_t *mem, array(object_t) *array);
 APE_INTERNAL object_t object_make_map(gcmem_t *mem);
 APE_INTERNAL object_t object_make_map_with_capacity(gcmem_t *mem, unsigned capacity);
 APE_INTERNAL object_t object_make_error(gcmem_t *mem, const char *message);
@@ -1209,6 +1209,7 @@ APE_INTERNAL gcmem_t*    object_get_mem(object_t obj);
 APE_INTERNAL bool        object_is_hashable(object_t obj);
 APE_INTERNAL void        object_to_string(object_t obj, strbuf_t *buf, bool quote_str);
 APE_INTERNAL const char* object_get_type_name(const object_type_t type);
+APE_INTERNAL char*       object_get_type_union_name(const object_type_t type);
 APE_INTERNAL char*       object_serialize(object_t object);
 APE_INTERNAL object_t    object_deep_copy(gcmem_t *mem, object_t object);
 APE_INTERNAL object_t    object_copy(gcmem_t *mem, object_t obj);
@@ -1221,7 +1222,7 @@ APE_INTERNAL bool           object_get_bool(object_t obj);
 APE_INTERNAL double         object_get_number(object_t obj);
 APE_INTERNAL function_t*    object_get_function(object_t obj);
 APE_INTERNAL const char*    object_get_string(object_t obj);
-APE_INTERNAL native_function_t*     object_get_native_function(object_t obj);
+APE_INTERNAL native_function_t* object_get_native_function(object_t obj);
 APE_INTERNAL object_type_t  object_get_type(object_t obj);
 
 APE_INTERNAL bool object_is_numeric(object_t obj);
@@ -1241,11 +1242,11 @@ APE_INTERNAL external_data_t* object_get_external_data(object_t object);
 APE_INTERNAL bool object_set_external_destroy_function(object_t object, external_data_destroy_fn destroy_fn);
 APE_INTERNAL bool object_set_external_copy_function(object_t object, external_data_copy_fn copy_fn);
 
-APE_INTERNAL array(object_t)* object_get_array(object_t array);
-APE_INTERNAL object_t         object_get_array_value_at(object_t array, int ix);
-APE_INTERNAL bool             object_set_array_value_at(object_t obj, int ix, object_t val);
-APE_INTERNAL bool             object_add_array_value(object_t array, object_t val);
-APE_INTERNAL int              object_get_array_length(object_t array);
+APE_INTERNAL object_t object_get_array_value_at(object_t array, int ix);
+APE_INTERNAL bool     object_set_array_value_at(object_t obj, int ix, object_t val);
+APE_INTERNAL bool     object_add_array_value(object_t array, object_t val);
+APE_INTERNAL int      object_get_array_length(object_t array);
+APE_INTERNAL bool     object_remove_array_value_at(object_t array, int ix);
 
 APE_INTERNAL int      object_get_map_length(object_t obj);
 APE_INTERNAL object_t object_get_map_key_at(object_t obj, int ix);
@@ -1277,15 +1278,17 @@ APE_INTERNAL gcmem_t *gcmem_make(void);
 APE_INTERNAL void gcmem_destroy(gcmem_t *mem);
 
 APE_INTERNAL object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type);
+APE_INTERNAL object_data_t* gcmem_get_object_data_from_pool(gcmem_t *mem, object_type_t type);
 
 APE_INTERNAL void gc_unmark_all(gcmem_t *mem);
 APE_INTERNAL void gc_mark_objects(object_t *objects, int count);
 APE_INTERNAL void gc_mark_object(object_t object);
-APE_INTERNAL void gc_mark_object_data(object_data_t *data);
 APE_INTERNAL void gc_sweep(gcmem_t *mem);
 
 APE_INTERNAL void gc_disable_on_object(object_t obj);
 APE_INTERNAL void gc_enable_on_object(object_t obj);
+
+APE_INTERNAL int gc_should_sweep(gcmem_t *mem);
 
 #endif /* gc_h */
 //FILE_END
@@ -1522,7 +1525,7 @@ double ape_uint64_to_double(uint64_t val) {
 //FILE_END
 //FILE_START:collections.c
 /*
-Copyright (c) 2020 Krzysztof Gabis
+Copyright (c) 2021 Krzysztof Gabis
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -2032,6 +2035,10 @@ void *valdict_get_value_at(const valdict_t_ *dict, unsigned int ix) {
     return (char*)dict->values + (dict->val_size * ix);
 }
 
+unsigned int valdict_get_capacity(const valdict_t_ *dict) {
+    return dict->item_capacity;
+}
+
 bool valdict_set_value_at(const valdict_t_ *dict, unsigned int ix, const void *value) {
     if (ix >= dict->count) {
         return false;
@@ -2501,6 +2508,10 @@ int array_count(const array_t_ *arr) {
         return 0;
     }
     return arr->count;
+}
+
+unsigned int array_get_capacity(const array_t_ *arr) {
+    return arr->capacity;
 }
 
 bool array_remove_at(array_t_ *arr, unsigned int ix) {
@@ -7097,7 +7108,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
         case EXPRESSION_MAP_LITERAL: {
             const map_literal_t *map = &expr->map;
             int len = ptrarray_count(map->keys);
-            compiler_emit(comp, OPCODE_MAP_START, 1, (uint64_t[]){len * 2});
+            compiler_emit(comp, OPCODE_MAP_START, 1, (uint64_t[]){len});
             for (int i = 0; i < len; i++) {
                 const expression_t *key = ptrarray_get(map->keys, i);
                 const expression_t *val = ptrarray_get(map->values, i);
@@ -7112,7 +7123,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                     goto error;
                 }
             }
-            compiler_emit(comp, OPCODE_MAP_END, 1, (uint64_t[]){len * 2});
+            compiler_emit(comp, OPCODE_MAP_END, 1, (uint64_t[]){len});
             break;
         }
         case EXPRESSION_PREFIX: {
@@ -7653,15 +7664,24 @@ static bool is_comparison(operator_t op) {
 #define OBJECT_BOOL_HEADER      0xfff9000000000000
 #define OBJECT_NULL_PATTERN     0xfffa000000000000
 
-static object_t object_make(object_type_t type, object_data_t *data);
 static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(object_t, object_t) *copies);
 static bool object_equals_wrapped(const object_t *a, const object_t *b);
 static unsigned long object_hash(object_t *obj_ptr);
 static unsigned long object_hash_string(const char *str);
 static unsigned long object_hash_double(double val);
+static array(object_t)* object_get_allocated_array(object_t object);
 static bool object_is_number(object_t obj);
 static uint64_t get_type_tag(object_type_t type);
 static bool freevals_are_allocated(function_t *fun);
+
+object_t object_make_from_data(object_type_t type, object_data_t *data) {
+    object_t object;
+    object.handle = OBJECT_PATTERN;
+    uint64_t type_tag = get_type_tag(type) & 0x7;
+    object.handle |= (type_tag << 48);
+    object.handle |= (uintptr_t)data; // assumes no pointer exceeds 48 bits
+    return object;
+}
 
 object_t object_make_number(double val) {
     object_t o = { .number = val };
@@ -7690,7 +7710,7 @@ object_t object_make_string(gcmem_t *mem, const char *string) {
         obj->string.is_allocated = true;
     }
     obj->string.hash = object_hash_string(string);
-    return object_make(OBJECT_STRING, obj);
+    return object_make_from_data(OBJECT_STRING, obj);
 }
 
 object_t object_make_string_no_copy(gcmem_t *mem, char *string) {
@@ -7707,7 +7727,7 @@ object_t object_make_string_no_copy(gcmem_t *mem, char *string) {
         obj->string.is_allocated = true;
         obj->string.hash = object_hash_string(string);
     }
-    return object_make(OBJECT_STRING, obj);
+    return object_make_from_data(OBJECT_STRING, obj);
 }
 
 object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) {
@@ -7729,7 +7749,7 @@ object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn f
     obj->native_function.name = ape_strdup(name);
     obj->native_function.fn = fn;
     obj->native_function.data = data;
-    return object_make(OBJECT_NATIVE_FUNCTION, obj);
+    return object_make_from_data(OBJECT_NATIVE_FUNCTION, obj);
 }
 
 object_t object_make_array(gcmem_t *mem) {
@@ -7737,14 +7757,14 @@ object_t object_make_array(gcmem_t *mem) {
 }
 
 object_t object_make_array_with_capacity(gcmem_t *mem, unsigned capacity) {
-    array(object_t) *arr = array_make_with_capacity(capacity, sizeof(object_t));
-    return object_make_array_with_array(mem, arr);
-}
-
-object_t object_make_array_with_array(gcmem_t *mem, array(object_t) *array) {
-    object_data_t *data = gcmem_alloc_object_data(mem, OBJECT_ARRAY);
-    data->array = array;
-    return object_make(OBJECT_ARRAY, data);
+    object_data_t *data = gcmem_get_object_data_from_pool(mem, OBJECT_ARRAY);
+    if (data) {
+        array_clear(data->array);
+        return object_make_from_data(OBJECT_ARRAY, data);
+    }
+    data = gcmem_alloc_object_data(mem, OBJECT_ARRAY);
+    data->array = array_make_with_capacity(capacity, sizeof(object_t));
+    return object_make_from_data(OBJECT_ARRAY, data);
 }
 
 object_t object_make_map(gcmem_t *mem) {
@@ -7752,11 +7772,16 @@ object_t object_make_map(gcmem_t *mem) {
 }
 
 object_t object_make_map_with_capacity(gcmem_t *mem, unsigned capacity) {
-    object_data_t *data = gcmem_alloc_object_data(mem, OBJECT_MAP);
+    object_data_t *data = gcmem_get_object_data_from_pool(mem, OBJECT_MAP);
+    if (data) {
+        valdict_clear(data->map);
+        return object_make_from_data(OBJECT_MAP, data);
+    }
+    data = gcmem_alloc_object_data(mem, OBJECT_MAP);
     data->map = valdict_make_with_capacity(capacity, sizeof(object_t), sizeof(object_t));
     valdict_set_hash_function(data->map, (collections_hash_fn)object_hash);
     valdict_set_equals_function(data->map, (collections_equals_fn)object_equals_wrapped);
-    return object_make(OBJECT_MAP, data);
+    return object_make_from_data(OBJECT_MAP, data);
 }
 
 object_t object_make_error(gcmem_t *mem, const char *error) {
@@ -7767,7 +7792,7 @@ object_t object_make_error_no_copy(gcmem_t *mem, char *error) {
     object_data_t *data = gcmem_alloc_object_data(mem, OBJECT_ERROR);
     data->error.message = error;
     data->error.traceback = NULL;
-    return object_make(OBJECT_ERROR, data);
+    return object_make_from_data(OBJECT_ERROR, data);
 }
 
 object_t object_make_errorf(gcmem_t *mem, const char *fmt, ...) {
@@ -7787,21 +7812,22 @@ object_t object_make_errorf(gcmem_t *mem, const char *fmt, ...) {
 object_t object_make_function(gcmem_t *mem, const char *name, compilation_result_t *comp_res, bool owns_data,
                               int num_locals, int num_args,
                               int free_vals_count) {
-    object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_FUNCTION);
+
+    object_data_t *data = gcmem_alloc_object_data(mem, OBJECT_FUNCTION);
     if (owns_data) {
-        obj->function.name = name ? ape_strdup(name) : ape_strdup("anonymous");
+        data->function.name = name ? ape_strdup(name) : ape_strdup("anonymous");
     } else {
-        obj->function.const_name = name ? name : "anonymous";
+        data->function.const_name = name ? name : "anonymous";
     }
-    obj->function.comp_result = comp_res;
-    obj->function.owns_data = owns_data;
-    obj->function.num_locals = num_locals;
-    obj->function.num_args = num_args;
-    obj->function.free_vals_count = free_vals_count;
-    if (free_vals_count >= APE_ARRAY_LEN(obj->function.free_vals_buf)) {
-        obj->function.free_vals_allocated = ape_malloc(sizeof(object_t) * free_vals_count);
+    data->function.comp_result = comp_res;
+    data->function.owns_data = owns_data;
+    data->function.num_locals = num_locals;
+    data->function.num_args = num_args;
+    if (free_vals_count >= APE_ARRAY_LEN(data->function.free_vals_buf)) {
+        data->function.free_vals_allocated = ape_malloc(sizeof(object_t) * free_vals_count);
     }
-    return object_make(OBJECT_FUNCTION, obj);
+    data->function.free_vals_count = free_vals_count;
+    return object_make_from_data(OBJECT_FUNCTION, data);
 }
 
 object_t object_make_external(gcmem_t *mem, void *data) {
@@ -7809,7 +7835,7 @@ object_t object_make_external(gcmem_t *mem, void *data) {
     obj->external.data = data;
     obj->external.data_destroy_fn = NULL;
     obj->external.data_copy_fn = NULL;
-    return object_make(OBJECT_EXTERNAL, obj);
+    return object_make_from_data(OBJECT_EXTERNAL, obj);
 }
 
 void object_deinit(object_t obj) {
@@ -7885,7 +7911,7 @@ bool object_is_hashable(object_t obj) {
     switch (type) {
         case OBJECT_STRING: return true;
         case OBJECT_NUMBER: return true;
-        case OBJECT_BOOL: return true;
+        case OBJECT_BOOL:   return true;
         default: return false;
     }
 }
@@ -7999,6 +8025,37 @@ const char *object_get_type_name(const object_type_t type) {
     return "NONE";
 }
 
+char* object_get_type_union_name(const object_type_t type) {
+    if (type == OBJECT_ANY || type == OBJECT_NONE || type == OBJECT_FREED) {
+        return ape_strdup(object_get_type_name(type));
+    }
+    strbuf_t *res = strbuf_make();
+    bool in_between = false;
+#define CHECK_TYPE(t) \
+    do {\
+        if ((type & t) == t) {\
+            if (in_between) {\
+                strbuf_append(res, "|");\
+            }\
+            strbuf_append(res, object_get_type_name(t));\
+            in_between = true;\
+        }\
+    } while (0)
+
+    CHECK_TYPE(OBJECT_NUMBER);
+    CHECK_TYPE(OBJECT_BOOL);
+    CHECK_TYPE(OBJECT_STRING);
+    CHECK_TYPE(OBJECT_NULL);
+    CHECK_TYPE(OBJECT_NATIVE_FUNCTION);
+    CHECK_TYPE(OBJECT_ARRAY);
+    CHECK_TYPE(OBJECT_MAP);
+    CHECK_TYPE(OBJECT_FUNCTION);
+    CHECK_TYPE(OBJECT_EXTERNAL);
+    CHECK_TYPE(OBJECT_ERROR);
+
+    return strbuf_get_string_and_destroy(res);
+}
+
 char* object_serialize(object_t object) {
     strbuf_t *buf = strbuf_make();
     object_to_string(object, buf, true);
@@ -8039,13 +8096,12 @@ object_t object_copy(gcmem_t *mem, object_t obj) {
             break;
         }
         case OBJECT_ARRAY: {
-            array(object_t) *array = object_get_array(obj);
-            array(object_t) *res_array = array_make(object_t);
-            for (int i = 0; i < array_count(array); i++) {
-                object_t *array_obj = array_get(array, i);
-                array_add(res_array, array_obj);
+            int len = object_get_array_length(obj);
+            copy = object_make_array_with_capacity(mem, len);
+            for (int i = 0; i < len; i++) {
+                object_t item = object_get_array_value_at(obj, i);
+                object_add_array_value(copy, item);
             }
-            copy = object_make_array_with_array(mem, res_array);
             break;
         }
         case OBJECT_MAP: {
@@ -8293,15 +8349,9 @@ bool object_set_external_copy_function(object_t object, external_data_copy_fn co
     return true;
 }
 
-array(object_t)* object_get_array(object_t object) {
-    APE_ASSERT(object_get_type(object) == OBJECT_ARRAY);
-    object_data_t *data = object_get_allocated_data(object);
-    return data->array;
-}
-
 object_t object_get_array_value_at(object_t object, int ix) {
     APE_ASSERT(object_get_type(object) == OBJECT_ARRAY);
-    array(object_t)* array = object_get_array(object);
+    array(object_t)* array = object_get_allocated_array(object);
     if (ix < 0 || ix >= array_count(array)) {
         return object_make_null();
     }
@@ -8314,7 +8364,7 @@ object_t object_get_array_value_at(object_t object, int ix) {
 
 bool object_set_array_value_at(object_t object, int ix, object_t val) {
     APE_ASSERT(object_get_type(object) == OBJECT_ARRAY);
-    array(object_t)* array = object_get_array(object);
+    array(object_t)* array = object_get_allocated_array(object);
     if (ix < 0 || ix >= array_count(array)) {
         return false;
     }
@@ -8323,14 +8373,19 @@ bool object_set_array_value_at(object_t object, int ix, object_t val) {
 
 bool object_add_array_value(object_t object, object_t val) {
     APE_ASSERT(object_get_type(object) == OBJECT_ARRAY);
-    array(object_t)* array = object_get_array(object);
+    array(object_t)* array = object_get_allocated_array(object);
     return array_add(array, &val);
 }
 
 int object_get_array_length(object_t object) {
     APE_ASSERT(object_get_type(object) == OBJECT_ARRAY);
-    array(object_t)* array = object_get_array(object);
+    array(object_t)* array = object_get_allocated_array(object);
     return array_count(array);
+}
+
+APE_INTERNAL bool object_remove_array_value_at(object_t object, int ix) {
+    array(object_t)* array = object_get_allocated_array(object);
+    return array_remove_at(array, ix);
 }
 
 int object_get_map_length(object_t object) {
@@ -8407,15 +8462,6 @@ bool object_map_has_key(object_t object, object_t key) {
 }
 
 // INTERNAL
-static object_t object_make(object_type_t type, object_data_t *data) {
-    object_t object;
-    object.handle = OBJECT_PATTERN;
-    uint64_t type_tag = get_type_tag(type) & 0x7;
-    object.handle |= (type_tag << 48);
-    object.handle |= (uintptr_t)data; // assumes no pointer exceeds 48 bits
-    return object;
-}
-
 static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(object_t, object_t) *copies) {
     object_t *copy_ptr = valdict_get(copies, &obj);
     if (copy_ptr) {
@@ -8468,13 +8514,13 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
             break;
         }
         case OBJECT_ARRAY: {
-            array(object_t) *res_array = array_make(object_t);
-            for (int i = 0; i < object_get_array_length(obj); i++) {
-                object_t array_obj = object_get_array_value_at(obj, i);
-                object_t copy = object_deep_copy_internal(mem, array_obj, copies);
-                array_add(res_array, &copy);
+            int len = object_get_array_length(obj);
+            copy = object_make_array_with_capacity(mem, len);
+            for (int i = 0; i < len; i++) {
+                object_t item = object_get_array_value_at(obj, i);
+                object_t item_copy = object_deep_copy_internal(mem, item, copies);
+                object_add_array_value(copy, item_copy);
             }
-            copy = object_make_array_with_array(mem, res_array);
             valdict_set(copies, &obj, &copy);
             break;
         }
@@ -8501,6 +8547,7 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
     }
     return copy;
 }
+
 
 static bool object_equals_wrapped(const object_t *a_ptr, const object_t *b_ptr) {
     object_t a = *a_ptr;
@@ -8548,6 +8595,12 @@ static unsigned long object_hash_double(double val) { /* djb2 */
     return hash;
 }
 
+array(object_t)* object_get_allocated_array(object_t object) {
+    APE_ASSERT(object_get_type(object) == OBJECT_ARRAY);
+    object_data_t *data = object_get_allocated_data(object);
+    return data->array;
+}
+
 static bool object_is_number(object_t o) {
     return (o.handle & OBJECT_PATTERN) != OBJECT_PATTERN;
 }
@@ -8575,17 +8628,28 @@ static bool freevals_are_allocated(function_t *fun) {
 #include "object.h"
 #endif
 
-#define GCMEM_POOL_SIZE 1024
+#define GCMEM_POOL_SIZE 2048
+#define GCMEM_POOLS_NUM 2
+
+typedef struct object_data_pool {
+    object_data_t *data[GCMEM_POOL_SIZE];
+    int count;
+} object_data_pool_t;
 
 typedef struct gcmem {
+    int allocations_since_sweep;
+
     ptrarray(object_data_t) *objects;
     ptrarray(object_data_t) *objects_back;
 
     array(object_t) *objects_not_gced;
 
-    object_data_t *pool[GCMEM_POOL_SIZE];
-    int pool_index;
+    object_data_pool_t data_only_pool;
+    object_data_pool_t pools[GCMEM_POOLS_NUM];
 } gcmem_t;
+
+static object_data_pool_t* get_pool_for_type(gcmem_t *mem, object_type_t type);
+static bool can_data_be_put_in_pool(gcmem_t *mem, object_data_t *data);
 
 gcmem_t *gcmem_make() {
     gcmem_t *mem = ape_malloc(sizeof(gcmem_t));
@@ -8593,7 +8657,15 @@ gcmem_t *gcmem_make() {
     mem->objects = ptrarray_make();
     mem->objects_back = ptrarray_make();
     mem->objects_not_gced = array_make(object_t);
-    mem->pool_index = -1;
+    mem->allocations_since_sweep = 0;
+    mem->data_only_pool.count = 0;
+
+    for (int i = 0; i < GCMEM_POOLS_NUM; i++) {
+        object_data_pool_t *pool = &mem->pools[i];
+        mem->pools[i].count = 0;
+        memset(pool, 0, sizeof(object_data_pool_t));
+    }
+
     return mem;
 }
 
@@ -8601,6 +8673,7 @@ void gcmem_destroy(gcmem_t *mem) {
     if (!mem) {
         return;
     }
+
     for (int i = 0; i < ptrarray_count(mem->objects); i++) {
         object_data_t *obj = ptrarray_get(mem->objects, i);
         object_data_deinit(obj);
@@ -8609,25 +8682,50 @@ void gcmem_destroy(gcmem_t *mem) {
     ptrarray_destroy(mem->objects);
     ptrarray_destroy(mem->objects_back);
     array_destroy(mem->objects_not_gced);
-    for (int i = 0; i <= mem->pool_index; i++) {
-        ape_free(mem->pool[i]);
+
+    for (int i = 0; i < GCMEM_POOLS_NUM; i++) {
+        object_data_pool_t *pool = &mem->pools[i];
+        for (int j = 0; j < pool->count; j++) {
+            object_data_t *data = pool->data[j];
+            object_data_deinit(data);
+            ape_free(data);
+        }
+        memset(pool, 0, sizeof(object_data_pool_t));
     }
+
+    for (int i = 0; i < mem->data_only_pool.count; i++) {
+        ape_free(mem->data_only_pool.data[i]);
+    }
+
     memset(mem, 0, sizeof(gcmem_t));
     ape_free(mem);
 }
 
 object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type) {
     object_data_t *data = NULL;
-    if (mem->pool_index >= 0) {
-        data = mem->pool[mem->pool_index];
-        mem->pool_index--;
+    mem->allocations_since_sweep++;
+    if (mem->data_only_pool.count > 0) {
+        data = mem->data_only_pool.data[mem->data_only_pool.count - 1];
+        mem->data_only_pool.count--;
     } else {
         data = ape_malloc(sizeof(object_data_t));
     }
+
     memset(data, 0, sizeof(object_data_t));
     ptrarray_add(mem->objects, data);
     data->mem = mem;
     data->type = type;
+    return data;
+}
+
+object_data_t* gcmem_get_object_data_from_pool(gcmem_t *mem, object_type_t type) {
+    object_data_pool_t *pool = get_pool_for_type(mem, type);
+    if (!pool || pool->count <= 0) {
+        return NULL;
+    }
+    object_data_t *data = pool->data[pool->count - 1];
+    pool->count--;
+    ptrarray_add(mem->objects, data);
     return data;
 }
 
@@ -8660,9 +8758,19 @@ void gc_mark_object(object_t obj) {
             int len = object_get_map_length(obj);
             for (int i = 0; i < len; i++) {
                 object_t key = object_get_map_key_at(obj, i);
+                if (object_is_allocated(key)) {
+                    object_data_t *key_data = object_get_allocated_data(key);
+                    if (!key_data->gcmark) {
+                        gc_mark_object(key);
+                    }
+                }
                 object_t val = object_get_map_value_at(obj, i);
-                gc_mark_object(key);
-                gc_mark_object(val);
+                if (object_is_allocated(val)) {
+                    object_data_t *val_data = object_get_allocated_data(val);
+                    if (!val_data->gcmark) {
+                        gc_mark_object(val);
+                    }
+                }
             }
             break;
         }
@@ -8670,7 +8778,12 @@ void gc_mark_object(object_t obj) {
             int len = object_get_array_length(obj);
             for (int i = 0; i < len; i++) {
                 object_t val = object_get_array_value_at(obj, i);
-                gc_mark_object(val);
+                if (object_is_allocated(val)) {
+                    object_data_t *val_data = object_get_allocated_data(val);
+                    if (!val_data->gcmark) {
+                        gc_mark_object(val);
+                    }
+                }
             }
             break;
         }
@@ -8679,6 +8792,12 @@ void gc_mark_object(object_t obj) {
             for (int i = 0; i < function->free_vals_count; i++) {
                 object_t free_val = object_get_function_free_val(obj, i);
                 gc_mark_object(free_val);
+                if (object_is_allocated(free_val)) {
+                    object_data_t *free_val_data = object_get_allocated_data(free_val);
+                    if (!free_val_data->gcmark) {
+                        gc_mark_object(free_val);
+                    }
+                }
             }
             break;
         }
@@ -8697,18 +8816,25 @@ void gc_sweep(gcmem_t *mem) {
         if (data->gcmark) {
             ptrarray_add(mem->objects_back, data);
         } else {
-            object_data_deinit(data);
-            if (mem->pool_index < (GCMEM_POOL_SIZE - 1)) {
-                mem->pool_index++;
-                mem->pool[mem->pool_index] = data;
+            if (can_data_be_put_in_pool(mem, data)) {
+                object_data_pool_t *pool = get_pool_for_type(mem, data->type);
+                pool->data[pool->count] = data;
+                pool->count++;
             } else {
-                ape_free(data);
+                object_data_deinit(data);
+                if (mem->data_only_pool.count < GCMEM_POOL_SIZE) {
+                    mem->data_only_pool.data[mem->data_only_pool.count] = data;
+                    mem->data_only_pool.count++;
+                } else {
+                    ape_free(data);
+                }
             }
         }
     }
     ptrarray(object_t) *objs_temp = mem->objects;
     mem->objects = mem->objects_back;
     mem->objects_back = objs_temp;
+    mem->allocations_since_sweep = 0;
 }
 
 void gc_disable_on_object(object_t obj) {
@@ -8728,6 +8854,47 @@ void gc_enable_on_object(object_t obj) {
     }
     object_data_t *data = object_get_allocated_data(obj);
     array_remove_item(data->mem->objects_not_gced, &obj);
+}
+
+APE_INTERNAL int gc_should_sweep(gcmem_t *mem) {
+    return mem->allocations_since_sweep > 128;
+}
+
+// INTERNAL
+static object_data_pool_t* get_pool_for_type(gcmem_t *mem, object_type_t type) {
+    switch (type) {
+        case OBJECT_ARRAY: return &mem->pools[0];
+        case OBJECT_MAP:   return &mem->pools[1];
+        default:           return NULL;
+    }
+}
+
+static bool can_data_be_put_in_pool(gcmem_t *mem, object_data_t *data) {
+    object_t obj = object_make_from_data(data->type, data);
+
+    // this is to ensure that large objects won't be kept in pool indefinitely
+    switch (data->type) {
+        case OBJECT_ARRAY: {
+            if (object_get_array_length(obj) > 1024) {
+                return false;
+            }
+        }
+        case OBJECT_MAP: {
+            if (object_get_map_length(obj) > 1024) {
+                return false;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+    object_data_pool_t *pool = get_pool_for_type(mem, data->type);
+    if (!pool || pool->count >= GCMEM_POOL_SIZE) {
+        return false;
+    }
+
+    return true;
 }
 //FILE_END
 //FILE_START:builtins.c
@@ -8766,7 +8933,9 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t error_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t crash_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t assert_fn(vm_t *vm, void *data, int argc, object_t *args);
+static object_t random_seed_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t random_fn(vm_t *vm, void *data, int argc, object_t *args);
+static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args);
 
 // Type checks
 static object_t is_string_fn(vm_t *vm, void *data, int argc, object_t *args);
@@ -8829,7 +8998,9 @@ static struct {
     {"error",       error_fn},
     {"crash",       crash_fn},
     {"assert",      assert_fn},
+    {"random_seed", random_seed_fn},
     {"random",      random_fn},
+    {"slice",       slice_fn},
 
     // Type checks
     {"is_string",   is_string_fn},
@@ -8937,9 +9108,13 @@ static object_t reverse_fn(vm_t *vm, void *data, int argc, object_t *args) {
     object_t arg = args[0];
     object_type_t type = object_get_type(arg);
     if (type == OBJECT_ARRAY) {
-        array(object_t) *array = object_get_array(arg);
-        array_reverse(array);
-        return object_make_array_with_array(vm->mem, array);
+        int len = object_get_array_length(arg);
+        object_t res = object_make_array_with_capacity(vm->mem, len);
+        for (int i = 0; i < len; i++) {
+            object_t obj = object_get_array_value_at(arg, i);
+            object_set_array_value_at(res, len - i - 1, obj);
+        }
+        return res;
     } else if (type == OBJECT_STRING) {
         const char *str = object_get_string(arg);
         int len = (int)strlen(str);
@@ -8960,22 +9135,22 @@ static object_t array_fn(vm_t *vm, void *data, int argc, object_t *args) {
             return object_make_null();
         }
         int capacity = (int)object_get_number(args[0]);
-        array(object_t) *res_arr = array_make_with_capacity(capacity, sizeof(object_t));
+        object_t res = object_make_array_with_capacity(vm->mem, capacity);
         object_t obj_null = object_make_null();
         for (int i = 0; i < capacity; i++) {
-            array_add(res_arr, &obj_null);
+            object_add_array_value(res, obj_null);
         }
-        return object_make_array_with_array(vm->mem, res_arr);
+        return res;
     } else if (argc == 2) {
         if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER, OBJECT_ANY)) {
             return object_make_null();
         }
         int capacity = (int)object_get_number(args[0]);
-        array(object_t) *res_arr = array_make_with_capacity(capacity, sizeof(object_t));
+        object_t res = object_make_array_with_capacity(vm->mem, capacity);
         for (int i = 0; i < capacity; i++) {
-            array_add(res_arr, &args[1]);
+            object_add_array_value(res, args[1]);
         }
-        return object_make_array_with_array(vm->mem, res_arr);
+        return res;
     }
     CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER);
     return object_make_null();
@@ -9194,7 +9369,7 @@ static object_t deep_copy_fn(vm_t *vm, void *data, int argc, object_t *args) {
 
 static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
     (void)data;
-    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_ARRAY | OBJECT_STRING, OBJECT_ANY)) {
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_ARRAY | OBJECT_STRING, OBJECT_ARRAY | OBJECT_STRING)) {
         return object_make_null();
     }
     object_type_t type = object_get_type(args[0]);
@@ -9208,10 +9383,11 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
             vm_set_runtime_error(vm, err);
             return object_make_null();
         }
-        array(object_t) *arr = object_get_array(args[0]);
-        array(object_t) *item_arr = object_get_array(args[1]);
-        array_add_array(arr, item_arr);
-        return object_make_number(array_count(arr));
+        for (int i = 0; i < object_get_array_length(args[1]); i++) {
+            object_t item = object_get_array_value_at(args[1], i);
+            object_add_array_value(args[0], item);
+        }
+        return object_make_number(object_get_array_length(args[0]));
     } else if (type == OBJECT_STRING) {
         if (!CHECK_ARGS(vm, true, argc, args, OBJECT_STRING, OBJECT_STRING)) {
             return object_make_null();
@@ -9233,21 +9409,6 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
     return object_make_null();
 }
 
-static object_t assert_fn(vm_t *vm, void *data, int argc, object_t *args) {
-    (void)data;
-    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_BOOL)) {
-        return object_make_null();
-    }
-
-    if (!object_get_bool(args[0])) {
-        error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "assertion failed");
-        vm_set_runtime_error(vm, err);
-        return object_make_null();
-    }
-
-    return object_make_bool(true);
-}
-
 static object_t remove_fn(vm_t *vm, void *data, int argc, object_t *args) {
     (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_ARRAY, OBJECT_ANY)) {
@@ -9267,8 +9428,7 @@ static object_t remove_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_bool(false);
     }
 
-    array(object_t) *arr = object_get_array(args[0]);
-    bool res = array_remove_at(arr, ix);
+    bool res = object_remove_array_value_at(args[0], ix);
     return object_make_bool(res);
 }
 
@@ -9283,8 +9443,7 @@ static object_t remove_at_fn(vm_t *vm, void *data, int argc, object_t *args) {
 
     switch (type) {
         case OBJECT_ARRAY: {
-            array(object_t) *arr = object_get_array(args[0]);
-            bool res = array_remove_at(arr, ix);
+            bool res = object_remove_array_value_at(args[0], ix);
             return object_make_bool(res);
         }
         default:
@@ -9315,6 +9474,31 @@ static object_t crash_fn(vm_t *vm, void *data, int argc, object_t *args) {
     return object_make_null();
 }
 
+static object_t assert_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_BOOL)) {
+        return object_make_null();
+    }
+
+    if (!object_get_bool(args[0])) {
+        error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "assertion failed");
+        vm_set_runtime_error(vm, err);
+        return object_make_null();
+    }
+
+    return object_make_bool(true);
+}
+
+static object_t random_seed_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
+        return object_make_null();
+    }
+    int seed = object_get_number(args[0]);
+    srand(seed);
+    return object_make_bool(true);
+}
+
 static object_t random_fn(vm_t *vm, void *data, int argc, object_t *args) {
     double res = (double)rand() / RAND_MAX;
     if (argc == 0) {
@@ -9335,6 +9519,55 @@ static object_t random_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_number(res);
     } else {
         error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "Invalid number or arguments");
+        vm_set_runtime_error(vm, err);
+        return object_make_null();
+    }
+}
+
+static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_STRING | OBJECT_ARRAY, OBJECT_NUMBER)) {
+        return object_make_null();
+    }
+    object_type_t arg_type = object_get_type(args[0]);
+    int index = object_get_number(args[1]);
+    if (arg_type == OBJECT_ARRAY) {
+        int len = object_get_array_length(args[0]);
+        if (index < 0) {
+            index = len + index;
+            if (index < 0) {
+                index = 0;
+            }
+        }
+        object_t res = object_make_array_with_capacity(vm->mem, len - index);
+        for (int i = index; i < len; i++) {
+            object_t item = object_get_array_value_at(args[0], i);
+            object_add_array_value(res, item);
+        }
+        return res;
+    } else if (arg_type == OBJECT_STRING) {
+        const char *str = object_get_string(args[0]);
+        int len = (int)strlen(str);
+        if (index < 0) {
+            index = len + index;
+            if (index < 0) {
+                return object_make_string(vm->mem, "");
+            }
+        }
+        if (index >= len) {
+            return object_make_string(vm->mem, "");
+        }
+        char *res_str = ape_malloc(len - index + 1);
+        memset(res_str, 0, len - index + 1);
+        for (int i = index; i < len; i++) {
+            char c = str[i];
+            res_str[i - index] = c;
+        }
+        return object_make_string_no_copy(vm->mem, res_str);
+    } else {
+        const char *type_str = object_get_type_name(arg_type);
+        error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
+                                   "Invalid argument 0 passed to slice, got %s instead", type_str);
         vm_set_runtime_error(vm, err);
         return object_make_null();
     }
@@ -9529,10 +9762,11 @@ static bool check_args(vm_t *vm, bool generate_error, int argc, object_t *args, 
         if (!(type & expected_type)) {
             if (generate_error) {
                 const char *type_str = object_get_type_name(type);
-                const char *expected_type_str = object_get_type_name(expected_type);
+                char *expected_type_str = object_get_type_union_name(expected_type);
                 error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
                                            "Invalid argument %d type, got %s, expected %s",
                                            i, type_str, expected_type_str);
+                ape_free(expected_type_str);
                 vm_set_runtime_error(vm, err);
             }
             return false;
@@ -9771,7 +10005,6 @@ void vm_reset(vm_t *vm) {
 }
 
 bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants) {
-    int old_sp = vm->sp;
     int old_this_sp = vm->this_sp;
     int old_frames_count = vm->frames_count;
     object_t main_fn = object_make_function(vm->mem, "main", comp_res, false, 0, 0, 0);
@@ -9788,7 +10021,6 @@ bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants
 object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc, object_t *args) {
     object_type_t type = object_get_type(callee);
     if (type == OBJECT_FUNCTION) {
-        int old_sp = vm->sp;
         int old_this_sp = vm->this_sp;
         int old_frames_count = vm->frames_count;
         stack_push(vm, callee);
@@ -9833,13 +10065,6 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
 
     vm->running = true;
     vm->last_popped = object_make_null();
-
-    int ticks_between_gc = 0;
-    if (vm->config) {
-        ticks_between_gc = vm->config->gc_interval;
-    };
-
-    int ticks_since_gc = 0;
 
     while (vm->current_frame->ip < vm->current_frame->bytecode_size) {
         opcode_val_t opcode = frame_read_opcode(vm->current_frame);
@@ -10079,11 +10304,12 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 break;
             }
             case OPCODE_MAP_END: {
-                uint16_t count = frame_read_uint16(vm->current_frame);
+                uint16_t kvp_count = frame_read_uint16(vm->current_frame);
+                uint16_t items_count = kvp_count * 2;
                 object_t map_obj = this_stack_pop(vm);
-                object_t *kvpairs = vm->stack + vm->sp - count;
-                for (int i = 0; i < count; i += 2) {
-                    object_t key = kvpairs[i];
+                object_t *kv_pairs = vm->stack + vm->sp - items_count;
+                for (int i = 0; i < items_count; i += 2) {
+                    object_t key = kv_pairs[i];
                     if (!object_is_hashable(key)) {
                         object_type_t key_type = object_get_type(key);
                         const char *key_type_name = object_get_type_name(key_type);
@@ -10092,11 +10318,10 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                         vm_set_runtime_error(vm, err);
                         goto err;
                     }
-
-                    object_t val = kvpairs[i + 1];
+                    object_t val = kv_pairs[i + 1];
                     object_set_map_value(map_obj, key, val);
                 }
-                set_sp(vm, vm->sp - count);
+                set_sp(vm, vm->sp - items_count);
                 stack_push(vm, map_obj);
                 break;
             }
@@ -10408,11 +10633,8 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 vm->runtime_error = NULL;
             }
         }
-        if (ticks_between_gc >= 0 && ticks_since_gc >= ticks_between_gc) {
+        if (gc_should_sweep(vm->mem)) {
             run_gc(vm, constants);
-            ticks_since_gc = 0;
-        } else {
-            ticks_since_gc++;
         }
     }
 
@@ -10754,7 +10976,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 6
+#define APE_IMPL_VERSION_MINOR 7
 #define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
@@ -10870,10 +11092,6 @@ void ape_destroy(ape_t *ape) {
 
 void ape_set_repl_mode(ape_t *ape, bool enabled) {
     ape->config.repl_mode = enabled;
-}
-
-void ape_set_gc_interval(ape_t *ape, int interval) {
-    ape->config.gc_interval = interval;
 }
 
 void ape_set_stdout_write_function(ape_t *ape, ape_stdout_write_fn stdout_write, void *context) {
@@ -11696,7 +11914,6 @@ static void set_default_config(ape_t *ape) {
     ape_set_file_read_function(ape, read_file_default, NULL);
     ape_set_file_write_function(ape, write_file_default, NULL);
     ape_set_stdout_write_function(ape, stdout_write_default, NULL);
-    ape_set_gc_interval(ape, 10000);
 }
 
 static char* read_file_default(void *ctx, const char *filename){
@@ -11722,7 +11939,7 @@ static char* read_file_default(void *ctx, const char *filename){
         return NULL;
     }
     size_read = fread(file_contents, 1, size_to_read, fp);
-    if (size_read == 0 || ferror(fp)) {
+    if (ferror(fp)) {
         fclose(fp);
         free(file_contents);
         return NULL;
