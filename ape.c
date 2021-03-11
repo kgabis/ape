@@ -5415,9 +5415,10 @@ static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t s
     while (cur_token_is(p, TOKEN_COMMA)) {
         next_token(p);
 
-        if (cur_token_is(p, end_token)) {
+        if (trailing_comma_allowed && cur_token_is(p, end_token)) {
             break;
         }
+
         arg_expr = parse_expression(p, PRECEDENCE_LOWEST);
         if (!arg_expr) {
             goto err;
@@ -6083,7 +6084,7 @@ void code_to_string(uint8_t *code, src_pos_t *source_positions, size_t code_size
                 double val_double = ape_uint64_to_double(operands[i]);
                 strbuf_appendf(res, " %1.17g", val_double);
             } else {
-                strbuf_appendf(res, " %llu", operands[i]);
+                strbuf_appendf(res, " %llu", (long long unsigned int)operands[i]);
             }
             pos += def->operand_widths[i];
         }
@@ -9474,6 +9475,7 @@ static object_t error_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t crash_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     error_t *err = NULL;
     if (argc == 1 && object_get_type(args[0]) == OBJECT_STRING) {
         err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), object_get_string(args[0]));
@@ -9510,6 +9512,7 @@ static object_t random_seed_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t random_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     double res = (double)rand() / RAND_MAX;
     if (argc == 0) {
         return object_make_number(res);
@@ -9672,6 +9675,7 @@ static object_t is_native_function_fn(vm_t *vm, void *data, int argc, object_t *
 //-----------------------------------------------------------------------------
 
 static object_t sqrt_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9681,6 +9685,7 @@ static object_t sqrt_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t pow_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9691,6 +9696,7 @@ static object_t pow_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t sin_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9700,6 +9706,7 @@ static object_t sin_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t cos_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9709,6 +9716,7 @@ static object_t cos_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t tan_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9718,6 +9726,7 @@ static object_t tan_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t log_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9727,6 +9736,7 @@ static object_t log_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t ceil_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9736,6 +9746,7 @@ static object_t ceil_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t floor_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9745,6 +9756,7 @@ static object_t floor_fn(vm_t *vm, void *data, int argc, object_t *args) {
 }
 
 static object_t abs_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
@@ -9752,7 +9764,6 @@ static object_t abs_fn(vm_t *vm, void *data, int argc, object_t *args) {
     double res = fabs(arg);
     return object_make_number(res);
 }
-
 
 static bool check_args(vm_t *vm, bool generate_error, int argc, object_t *args, int expected_argc, object_type_t *expected_types) {
     if (argc != expected_argc) {
@@ -10987,7 +10998,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 7
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_PATCH 2
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
@@ -11896,6 +11907,7 @@ const char* ape_traceback_get_function_name(const ape_traceback_t *ape_traceback
 //-----------------------------------------------------------------------------
 
 static object_t ape_native_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)vm;
     native_fn_wrapper_t *wrapper = (native_fn_wrapper_t*)data;
     APE_ASSERT(vm == wrapper->ape->vm);
     ape_object_t res = wrapper->fn(wrapper->ape, wrapper->data, argc, (ape_object_t*)args);
@@ -11927,6 +11939,7 @@ static void set_default_config(ape_t *ape) {
 }
 
 static char* read_file_default(void *ctx, const char *filename){
+    (void)ctx;
     FILE *fp = fopen(filename, "r");
     size_t size_to_read = 0;
     size_t size_read = 0;
@@ -11959,7 +11972,8 @@ static char* read_file_default(void *ctx, const char *filename){
     return file_contents;
 }
 
-static size_t write_file_default(void* context, const char *path, const char *string, size_t string_size) {
+static size_t write_file_default(void* ctx, const char *path, const char *string, size_t string_size) {
+    (void)ctx;
     FILE *fp = fopen(path, "w");
     if (!fp) {
         return 0;
@@ -11969,7 +11983,8 @@ static size_t write_file_default(void* context, const char *path, const char *st
     return written;
 }
 
-static size_t stdout_write_default(void* context, const void *data, size_t size) {
+static size_t stdout_write_default(void* ctx, const void *data, size_t size) {
+    (void)ctx;
     return fwrite(data, 1, size, stdout);
 }
 //FILE_END

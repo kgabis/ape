@@ -13,7 +13,7 @@ echo "    OK"
 
 cd ${dir}
 echo "Compiling benchmarks"
-gcc -O3 -DAPE_BENCHMARKS_MAIN *.c -o benchmarks
+gcc -O3 -DAPE_BENCHMARKS_MAIN *.c -o benchmarks -lm
 echo "    OK"
 
 echo "Running benchmarks"

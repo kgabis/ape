@@ -22,3 +22,4 @@ fn() { recover (e) { recover (e1) { return } return } }()
 recover (e) { return }
 fn() { return fn() { recover (e) { return crash() } return crash() }() }()
 var this = ""
+append([], 1,)

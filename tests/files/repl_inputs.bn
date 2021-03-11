@@ -10,3 +10,4 @@ fn make_adder(inc) { var n = 0; return fn() { n = n + inc; return n; };}
 const adder3 = make_adder(3)
 assert(adder3() == 3)
 assert(adder3() == 6)
+[1, 2, 3,]
