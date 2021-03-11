@@ -277,7 +277,7 @@ COLLECTIONS_API void         array_clear_and_deinit_items_(array_t_ *arr, array_
 COLLECTIONS_API void         array_lock_capacity(array_t_ *arr);
 COLLECTIONS_API int          array_get_index(const array_t_ *arr, void *ptr);
 COLLECTIONS_API bool         array_contains(const array_t_ *arr, void *ptr);
-COLLECTIONS_API void*        array_data(array_t_ *arr);
+COLLECTIONS_API void*        array_data(array_t_ *arr); // might become invalidated by remove/add operations
 COLLECTIONS_API const void*  array_const_data(const array_t_ *arr);
 COLLECTIONS_API bool         array_orphan_data(array_t_ *arr);
 COLLECTIONS_API void         array_reverse(array_t_ *arr);
@@ -319,7 +319,7 @@ COLLECTIONS_API void         ptrarray_lock_capacity(ptrarray_t_ *arr);
 COLLECTIONS_API int          ptrarray_get_index(ptrarray_t_ *arr, void *ptr);
 COLLECTIONS_API bool         ptrarray_contains(ptrarray_t_ *arr, void *ptr);
 COLLECTIONS_API void *       ptrarray_get_addr(ptrarray_t_ *arr, unsigned int ix);
-COLLECTIONS_API void*        ptrarray_data(ptrarray_t_ *arr);
+COLLECTIONS_API void*        ptrarray_data(ptrarray_t_ *arr); // might become invalidated by remove/add operations
 COLLECTIONS_API void         ptrarray_reverse(ptrarray_t_ *arr);
 
 //-----------------------------------------------------------------------------
@@ -2322,6 +2322,7 @@ void ptrdict_clear(ptrdict_t_ *dict) {
 
 typedef struct array_ {
     unsigned char *data;
+    unsigned char *data_allocated;
     unsigned int count;
     unsigned int capacity;
     size_t element_size;
@@ -2395,8 +2396,9 @@ bool array_add(array_t_ *arr, const void *value) {
             return false;
         }
         memcpy(new_data, arr->data, arr->count * arr->element_size);
-        collections_free(arr->data);
-        arr->data = new_data;
+        collections_free(arr->data_allocated);
+        arr->data_allocated = new_data;
+        arr->data = arr->data_allocated;
         arr->capacity = new_capacity;
     }
     if (value) {
@@ -2518,6 +2520,12 @@ bool array_remove_at(array_t_ *arr, unsigned int ix) {
     if (ix >= arr->count) {
         return false;
     }
+    if (ix == 0) {
+        arr->data += arr->element_size;
+        arr->capacity--;
+        arr->count--;
+        return true;
+    }
     if (ix == (arr->count - 1)) {
         arr->count--;
         return true;
@@ -2571,7 +2579,7 @@ void* array_data(array_t_ *arr) {
     return arr->data;
 }
 
-const void*  array_const_data(const array_t_ *arr) {
+const void* array_const_data(const array_t_ *arr) {
     return arr->data;
 }
 
@@ -2598,11 +2606,13 @@ void array_reverse(array_t_ *arr) {
 
 static bool array_init_with_capacity(array_t_ *arr, unsigned int capacity, size_t element_size) {
     if (capacity > 0) {
-        arr->data = collections_malloc(capacity * element_size);
-        if (arr->data == NULL) {
+        arr->data_allocated = collections_malloc(capacity * element_size);
+        arr->data = arr->data_allocated;
+        if (arr->data_allocated == NULL) {
             return false;
         }
     } else {
+        arr->data_allocated = NULL;
         arr->data = NULL;
     }
     arr->capacity = capacity;
@@ -2613,7 +2623,7 @@ static bool array_init_with_capacity(array_t_ *arr, unsigned int capacity, size_
 }
 
 static void array_deinit(array_t_ *arr) {
-    collections_free(arr->data);
+    collections_free(arr->data_allocated);
 }
 
 //-----------------------------------------------------------------------------
@@ -10977,7 +10987,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 7
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
