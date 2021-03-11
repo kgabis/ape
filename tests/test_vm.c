@@ -1,5 +1,7 @@
 #pragma GCC diagnostic push
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wlanguage-extension-token"
+#endif
 
 #include "test_vm.h"
 
@@ -72,11 +74,14 @@ void vm_test() {
 static object_t execute(const char *input, bool must_succeed) {
     bool ok = false;
 
+    ape_config_t config;
+    memset(&config, 0, sizeof(ape_config_t));
+
+    config.repl_mode = true;
+
     gcmem_t *mem = gcmem_make();
 
-    ape_config_t *config = malloc(sizeof(ape_config_t));
-    config->repl_mode = true;
-    compiler_t *comp = compiler_make(config, mem, ptrarray_make());
+    compiler_t *comp = compiler_make(&config, mem, ptrarray_make());
 
     compilation_result_t *comp_res = compiler_compile(comp, input);
     if (!comp_res || ptrarray_count(comp->errors) > 0) {
@@ -1021,6 +1026,9 @@ static void test_errors() {
         {"var arr = [1, 2, 3];\narr[4] = 5", 1, 3},
         {"var arr = [1, 2, 3];\narr[\"a\"] = 5", 1, 3},
     };
+
+    ape_config_t config;
+    memset(&config, 0, sizeof(ape_config_t));
 
     for (int i = 0; i < APE_ARRAY_LEN(tests); i++) {
         typeof(tests[0]) test = tests[i];

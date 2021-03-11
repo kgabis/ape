@@ -1,5 +1,7 @@
 #pragma GCC diagnostic push
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wlanguage-extension-token"
+#endif
 
 #include "test_code.h"
 

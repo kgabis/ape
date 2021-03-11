@@ -1,5 +1,7 @@
 #pragma GCC diagnostic push
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wlanguage-extension-token"
+#endif
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 
 #include "test_api.h"
@@ -284,14 +286,14 @@ static void test_traceback() {
     
     ape_set_native_function(ape, "custom_error", custom_error_fun, NULL);
 
-    ape_object_t res = ape_execute(ape, program);
+    ape_execute(ape, program);
     if (ape_has_errors(ape)) {
         print_ape_errors(ape);
         assert(false);
     }
 
     {
-        res = ape_call(ape, "traceback", 0, NULL);
+        ape_call(ape, "traceback", 0, NULL);
         if (!ape_has_errors(ape)) {
             assert(false);
         }
@@ -324,7 +326,7 @@ static void test_traceback() {
     }
 
     {
-        res = ape_call(ape, "traceback_native_function", 0, NULL);
+        ape_call(ape, "traceback_native_function", 0, NULL);
         if (!ape_has_errors(ape)) {
             assert(false);
         }

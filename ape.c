@@ -8889,6 +8889,7 @@ static bool can_data_be_put_in_pool(gcmem_t *mem, object_data_t *data) {
             if (object_get_array_length(obj) > 1024) {
                 return false;
             }
+            break;
         }
         case OBJECT_MAP: {
             if (object_get_map_length(obj) > 1024) {
@@ -10998,7 +10999,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 7
-#define APE_IMPL_VERSION_PATCH 2
+#define APE_IMPL_VERSION_PATCH 3
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
