@@ -121,31 +121,6 @@ extern ape_free_fn ape_free;
 #endif /* common_h */
 //FILE_END
 //FILE_START:collections.h
-/*
-Copyright (c) 2021 Krzysztof Gabis
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
-
-
-/* To update:
- curl https://raw.githubusercontent.com/kgabis/cutils/master/collections.h > collections.h
- curl https://raw.githubusercontent.com/kgabis/cutils/master/collections.c > collections.c
- */
-
 #ifndef collections_h
 #define collections_h
 
@@ -734,7 +709,7 @@ APE_INTERNAL statement_t* statement_make_recover(ident_t error_ident, code_block
 
 APE_INTERNAL void statement_destroy(statement_t *stmt);
 
-APE_INTERNAL statement_t* statement_copy(statement_t *stmt);
+APE_INTERNAL statement_t* statement_copy(const statement_t *stmt);
 
 APE_INTERNAL code_block_t* code_block_make(ptrarray(statement_t) *statements);
 APE_INTERNAL void code_block_destroy(code_block_t *stmt);
@@ -757,7 +732,7 @@ APE_INTERNAL expression_t* expression_make_logical(operator_t op, expression_t *
 
 APE_INTERNAL void expression_destroy(expression_t *expr);
 
-APE_INTERNAL expression_t* expression_copy(expression_t *expr);
+APE_INTERNAL expression_t* expression_copy(const expression_t *expr);
 
 APE_INTERNAL void statement_to_string(const statement_t *stmt, strbuf_t *buf);
 APE_INTERNAL void expression_to_string(expression_t *expr, strbuf_t *buf);
@@ -1500,6 +1475,9 @@ char* ape_strndup(const char *string, size_t n) {
 }
 
 char* ape_strdup(const char *string) {
+    if (!string) {
+        return NULL;
+    }
     return ape_strndup(string, strlen(string));
 }
 
@@ -1524,25 +1502,6 @@ double ape_uint64_to_double(uint64_t val) {
 }
 //FILE_END
 //FILE_START:collections.c
-/*
-Copyright (c) 2021 Krzysztof Gabis
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
-
 #ifndef COLLECTIONS_AMALGAMATED
 #include "collections.h"
 #endif
@@ -3697,8 +3656,7 @@ void expression_destroy(expression_t *expr) {
     ape_free(expr);
 }
 
-expression_t* expression_copy(expression_t *expr) {
-    APE_ASSERT(expr);
+expression_t* expression_copy(const expression_t *expr) {
     if (!expr) {
         return NULL;
     }
@@ -3940,8 +3898,7 @@ void statement_destroy(statement_t *stmt) {
     ape_free(stmt);
 }
 
-statement_t* statement_copy(statement_t *stmt) {
-    APE_ASSERT(stmt);
+statement_t* statement_copy(const statement_t *stmt) {
     if (!stmt) {
         return NULL;
     }
@@ -3957,7 +3914,15 @@ statement_t* statement_copy(statement_t *stmt) {
             break;
         }
         case STATEMENT_IF: {
-            ptrarray(expression_t) *cases_copy = ptrarray_copy_with_items(stmt->if_statement.cases, expression_copy);
+            ptrarray(if_case_t) *cases_copy = ptrarray_make();
+            for (int i = 0; i < ptrarray_count(stmt->if_statement.cases); i++) {
+                if_case_t *if_case = ptrarray_get(stmt->if_statement.cases, i);
+                expression_t *test_copy = expression_copy(if_case->test);
+                code_block_t *consequence_copy = code_block_copy(if_case->consequence);
+                if_case_t *if_case_copy = if_case_make(test_copy, consequence_copy);
+                ptrarray_add(cases_copy, if_case_copy);
+
+            }
             code_block_t *alternative_copy = code_block_copy(stmt->if_statement.alternative);
             res = statement_make_if(cases_copy, alternative_copy);
             break;
@@ -4016,7 +3981,7 @@ statement_t* statement_copy(statement_t *stmt) {
         }
     }
     res->pos = stmt->pos;
-    return NULL;
+    return res;
 }
 
 code_block_t* code_block_make(ptrarray(statement_t) *statements) {
@@ -4034,6 +3999,9 @@ void code_block_destroy(code_block_t *block) {
 }
 
 code_block_t* code_block_copy(code_block_t *block) {
+    if (!block) {
+        return NULL;
+    }
     ptrarray(statement_t) *statements_copy = ptrarray_make();
     for (int i = 0; i < ptrarray_count(block->statements); i++) {
         statement_t *statement = ptrarray_get(block->statements, i);
@@ -10027,6 +9995,9 @@ void vm_reset(vm_t *vm) {
 }
 
 bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants) {
+#ifdef APE_DEBUG
+    int old_sp = vm->sp;
+#endif
     int old_this_sp = vm->this_sp;
     int old_frames_count = vm->frames_count;
     object_t main_fn = object_make_function(vm->mem, "main", comp_res, false, 0, 0, 0);
@@ -10043,6 +10014,9 @@ bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants
 object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc, object_t *args) {
     object_type_t type = object_get_type(callee);
     if (type == OBJECT_FUNCTION) {
+#ifdef APE_DEBUG
+        int old_sp = vm->sp;
+#endif
         int old_this_sp = vm->this_sp;
         int old_frames_count = vm->frames_count;
         stack_push(vm, callee);
@@ -10999,7 +10973,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 7
-#define APE_IMPL_VERSION_PATCH 3
+#define APE_IMPL_VERSION_PATCH 4
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
