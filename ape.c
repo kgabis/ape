@@ -553,7 +553,7 @@ typedef struct if_case {
 
 typedef struct fn_literal {
     char *name;
-    array(ident_t) *params;
+    ptrarray(ident_t) *params;
     code_block_t *body;
 } fn_literal_t;
 
@@ -604,7 +604,7 @@ typedef struct ident {
 typedef struct expression {
     expression_type_t type;
     union {
-        ident_t ident;
+        ident_t *ident;
         double number_literal;
         bool bool_literal;
         char *string_literal;
@@ -638,7 +638,7 @@ typedef enum statement_type {
 } statement_type_t;
 
 typedef struct define_statement {
-    ident_t name;
+    ident_t *name;
     expression_t *value;
     bool assignable;
 } define_statement_t;
@@ -654,7 +654,7 @@ typedef struct while_loop_statement {
 } while_loop_statement_t;
 
 typedef struct foreach_statement {
-    ident_t iterator;
+    ident_t *iterator;
     expression_t *source;
     code_block_t *body;
 } foreach_statement_t;
@@ -671,7 +671,7 @@ typedef struct import_statement {
 } import_statement_t;
 
 typedef struct recover_statement {
-    ident_t error_ident;
+    ident_t *error_ident;
     code_block_t *body;
 } recover_statement_t;
 
@@ -694,18 +694,18 @@ typedef struct statement {
 
 APE_INTERNAL char* statements_to_string(ptrarray(statement_t) *statements);
 
-APE_INTERNAL statement_t* statement_make_define(ident_t name, expression_t *value, bool assignable);
+APE_INTERNAL statement_t* statement_make_define(ident_t *name, expression_t *value, bool assignable);
 APE_INTERNAL statement_t* statement_make_if(ptrarray(if_case_t) *cases, code_block_t *alternative);
 APE_INTERNAL statement_t* statement_make_return(expression_t *value);
 APE_INTERNAL statement_t* statement_make_expression(expression_t *value);
 APE_INTERNAL statement_t* statement_make_while_loop(expression_t *test, code_block_t *body);
 APE_INTERNAL statement_t* statement_make_break(void);
-APE_INTERNAL statement_t* statement_make_foreach(ident_t iterator, expression_t *source, code_block_t *body);
+APE_INTERNAL statement_t* statement_make_foreach(ident_t *iterator, expression_t *source, code_block_t *body);
 APE_INTERNAL statement_t* statement_make_for_loop(statement_t *init, expression_t *test, expression_t *update, code_block_t *body);
 APE_INTERNAL statement_t* statement_make_continue(void);
 APE_INTERNAL statement_t* statement_make_block(code_block_t *block);
 APE_INTERNAL statement_t* statement_make_import(char *path);
-APE_INTERNAL statement_t* statement_make_recover(ident_t error_ident, code_block_t *body);
+APE_INTERNAL statement_t* statement_make_recover(ident_t *error_ident, code_block_t *body);
 
 APE_INTERNAL void statement_destroy(statement_t *stmt);
 
@@ -715,7 +715,7 @@ APE_INTERNAL code_block_t* code_block_make(ptrarray(statement_t) *statements);
 APE_INTERNAL void code_block_destroy(code_block_t *stmt);
 APE_INTERNAL code_block_t* code_block_copy(code_block_t *block);
 
-APE_INTERNAL expression_t* expression_make_ident(ident_t ident);
+APE_INTERNAL expression_t* expression_make_ident(ident_t *ident);
 APE_INTERNAL expression_t* expression_make_number_literal(double val);
 APE_INTERNAL expression_t* expression_make_bool_literal(bool val);
 APE_INTERNAL expression_t* expression_make_string_literal(char *value);
@@ -724,7 +724,7 @@ APE_INTERNAL expression_t* expression_make_array_literal(ptrarray(expression_t) 
 APE_INTERNAL expression_t* expression_make_map_literal(ptrarray(expression_t) *keys, ptrarray(expression_t) *values);
 APE_INTERNAL expression_t* expression_make_prefix(operator_t op, expression_t *right);
 APE_INTERNAL expression_t* expression_make_infix(operator_t op, expression_t *left, expression_t *right);
-APE_INTERNAL expression_t* expression_make_fn_literal(array(ident_t) *params, code_block_t *body);
+APE_INTERNAL expression_t* expression_make_fn_literal(ptrarray(ident_t) *params, code_block_t *body);
 APE_INTERNAL expression_t* expression_make_call(expression_t *function, ptrarray(expression_t) *args);
 APE_INTERNAL expression_t* expression_make_index(expression_t *left, expression_t *index);
 APE_INTERNAL expression_t* expression_make_assign(expression_t *dest, expression_t *source);
@@ -744,9 +744,9 @@ APE_INTERNAL const char *expression_type_to_string(expression_type_t type);
 
 APE_INTERNAL void fn_literal_deinit(fn_literal_t *fn);
 
-APE_INTERNAL ident_t ident_make(token_t tok);
-APE_INTERNAL ident_t ident_copy(ident_t ident);
-APE_INTERNAL void ident_deinit(ident_t *ident);
+APE_INTERNAL ident_t* ident_make(token_t tok);
+APE_INTERNAL ident_t* ident_copy(const ident_t *ident);
+APE_INTERNAL void ident_destroy(ident_t *ident);
 
 APE_INTERNAL if_case_t *if_case_make(expression_t *test, code_block_t *consequence);
 APE_INTERNAL void if_case_destroy(if_case_t *cond);
@@ -2977,7 +2977,9 @@ error_t* error_makef(error_type_t type, src_pos_t pos, const char *format, ...) 
     va_end(args);
     va_start(args, format);
     char *res = (char*)ape_malloc(to_write + 1);
-    vsprintf(res, format, args);
+    int written = vsprintf(res, format, args);
+    (void)written;
+    APE_ASSERT(to_write == written);
     va_end(args);
     return error_make_no_copy(type, pos, res);
 }
@@ -3491,7 +3493,7 @@ static void add_line(lexer_t *lex, int offset) {
 static expression_t* expression_make(expression_type_t type);
 static statement_t* statement_make(statement_type_t type);
 
-expression_t* expression_make_ident(ident_t ident) {
+expression_t* expression_make_ident(ident_t *ident) {
     expression_t *res = expression_make(EXPRESSION_IDENT);
     res->ident = ident;
     return res;
@@ -3548,7 +3550,7 @@ expression_t* expression_make_infix(operator_t op, expression_t *left, expressio
     return res;
 }
 
-expression_t* expression_make_fn_literal(array(ident_t) *params, code_block_t *body) {
+expression_t* expression_make_fn_literal(ptrarray(ident_t) *params, code_block_t *body) {
     expression_t *res = expression_make(EXPRESSION_FUNCTION_LITERAL);
     res->fn_literal.name = NULL;
     res->fn_literal.params = params;
@@ -3596,7 +3598,7 @@ void expression_destroy(expression_t *expr) {
             break;
         }
         case EXPRESSION_IDENT: {
-            ident_deinit(&expr->ident);
+            ident_destroy(expr->ident);
             break;
         }
         case EXPRESSION_NUMBER_LITERAL:
@@ -3667,7 +3669,7 @@ expression_t* expression_copy(const expression_t *expr) {
             break;
         }
         case EXPRESSION_IDENT: {
-            ident_t ident = ident_copy(expr->ident);
+            ident_t *ident = ident_copy(expr->ident);
             res = expression_make_ident(ident);
             break;
         }
@@ -3710,11 +3712,11 @@ expression_t* expression_copy(const expression_t *expr) {
             break;
         }
         case EXPRESSION_FUNCTION_LITERAL: {
-            array(ident_t) *params_copy = array_make(ident_t);
-            for (int i = 0; i < array_count(expr->fn_literal.params); i++) {
-                ident_t *param = array_get(expr->fn_literal.params, i);
-                ident_t copy = ident_copy(*param);
-                array_add(params_copy, &copy);
+            ptrarray(ident_t) *params_copy = ptrarray_make();
+            for (int i = 0; i < ptrarray_count(expr->fn_literal.params); i++) {
+                ident_t *param = ptrarray_get(expr->fn_literal.params, i);
+                ident_t *copy = ident_copy(param);
+                ptrarray_add(params_copy, copy);
             }
             code_block_t *body_copy = code_block_copy(expr->fn_literal.body);
             res = expression_make_fn_literal(params_copy, body_copy);
@@ -3750,7 +3752,7 @@ expression_t* expression_copy(const expression_t *expr) {
     return res;
 }
 
-statement_t* statement_make_define(ident_t name, expression_t *value, bool assignable) {
+statement_t* statement_make_define(ident_t *name, expression_t *value, bool assignable) {
     statement_t *res = statement_make(STATEMENT_DEFINE);
     res->define.name = name;
     res->define.value = value;
@@ -3789,7 +3791,7 @@ statement_t* statement_make_break() {
     return res;
 }
 
-statement_t* statement_make_foreach(ident_t iterator, expression_t *source, code_block_t *body) {
+statement_t* statement_make_foreach(ident_t *iterator, expression_t *source, code_block_t *body) {
     statement_t *res = statement_make(STATEMENT_FOREACH);
     res->foreach.iterator = iterator;
     res->foreach.source = source;
@@ -3823,7 +3825,7 @@ statement_t* statement_make_import(char *path) {
     return res;
 }
 
-statement_t* statement_make_recover(ident_t error_ident, code_block_t *body) {
+statement_t* statement_make_recover(ident_t *error_ident, code_block_t *body) {
     statement_t *res = statement_make(STATEMENT_RECOVER);
     res->recover.error_ident = error_ident;
     res->recover.body = body;
@@ -3840,7 +3842,7 @@ void statement_destroy(statement_t *stmt) {
             break;
         }
         case STATEMENT_DEFINE: {
-            ident_deinit(&stmt->define.name);
+            ident_destroy(stmt->define.name);
             expression_destroy(stmt->define.value);
             break;
         }
@@ -3869,7 +3871,7 @@ void statement_destroy(statement_t *stmt) {
             break;
         }
         case STATEMENT_FOREACH: {
-            ident_deinit(&stmt->foreach.iterator);
+            ident_destroy(stmt->foreach.iterator);
             expression_destroy(stmt->foreach.source);
             code_block_destroy(stmt->foreach.body);
             break;
@@ -3891,7 +3893,7 @@ void statement_destroy(statement_t *stmt) {
         }
         case STATEMENT_RECOVER: {
             code_block_destroy(stmt->recover.body);
-            ident_deinit(&stmt->recover.error_ident);
+            ident_destroy(stmt->recover.error_ident);
             break;
         }
     }
@@ -4033,7 +4035,7 @@ void statement_to_string(const statement_t *stmt, strbuf_t *buf) {
             } else {
                 strbuf_append(buf, "const ");
             }
-            strbuf_append(buf, def_stmt->name.value);
+            strbuf_append(buf, def_stmt->name->value);
             strbuf_append(buf, " = ");
 
             if (def_stmt->value) {
@@ -4104,7 +4106,7 @@ void statement_to_string(const statement_t *stmt, strbuf_t *buf) {
         }
         case STATEMENT_FOREACH: {
             strbuf_append(buf, "for (");
-            strbuf_appendf(buf, "%s", stmt->foreach.iterator.value);
+            strbuf_appendf(buf, "%s", stmt->foreach.iterator->value);
             strbuf_append(buf, " in ");
             expression_to_string(stmt->foreach.source, buf);
             strbuf_append(buf, ")");
@@ -4132,7 +4134,7 @@ void statement_to_string(const statement_t *stmt, strbuf_t *buf) {
             break;
         }
         case STATEMENT_RECOVER: {
-            strbuf_appendf(buf, "recover (%s)", stmt->recover.error_ident.value);
+            strbuf_appendf(buf, "recover (%s)", stmt->recover.error_ident->value);
             code_block_to_string(stmt->recover.body, buf);
             break;
         }
@@ -4142,7 +4144,7 @@ void statement_to_string(const statement_t *stmt, strbuf_t *buf) {
 void expression_to_string(expression_t *expr, strbuf_t *buf) {
     switch (expr->type) {
         case EXPRESSION_IDENT: {
-            strbuf_append(buf, expr->ident.value);
+            strbuf_append(buf, expr->ident->value);
             break;
         }
         case EXPRESSION_NUMBER_LITERAL: {
@@ -4215,10 +4217,10 @@ void expression_to_string(expression_t *expr, strbuf_t *buf) {
             strbuf_append(buf, "fn");
 
             strbuf_append(buf, "(");
-            for (int i = 0; i < array_count(fn->params); i++) {
-                ident_t *param = array_get(fn->params, i);
+            for (int i = 0; i < ptrarray_count(fn->params); i++) {
+                ident_t *param = ptrarray_get(fn->params, i);
                 strbuf_append(buf, param->value);
-                if (i < (array_count(fn->params) - 1)) {
+                if (i < (ptrarray_count(fn->params) - 1)) {
                     strbuf_append(buf, ", ");
                 }
             }
@@ -4331,28 +4333,32 @@ const char *expression_type_to_string(expression_type_t type) {
 
 void fn_literal_deinit(fn_literal_t *fn) {
     ape_free(fn->name);
-    array_destroy_with_items(fn->params, ident_deinit);
+    ptrarray_destroy_with_items(fn->params, ident_destroy);
     code_block_destroy(fn->body);
 }
 
-ident_t ident_make(token_t tok) {
-    ident_t res;
-    res.value = token_duplicate_literal(&tok);
-    res.pos = tok.pos;
+ident_t* ident_make(token_t tok) {
+    ident_t *res = ape_malloc(sizeof(ident_t));
+    res->value = token_duplicate_literal(&tok);
+    res->pos = tok.pos;
     return res;
 }
 
-ident_t ident_copy(ident_t ident) {
-    ident_t res;
-    res.value = ape_strdup(ident.value);
-    res.pos = ident.pos;
+ident_t* ident_copy(const ident_t *ident) {
+    ident_t *res = ape_malloc(sizeof(ident_t));
+    res->value = ape_strdup(ident->value);
+    res->pos = ident->pos;
     return res;
 }
 
-void ident_deinit(ident_t *ident) {
+void ident_destroy(ident_t *ident) {
+    if (!ident) {
+        return;
+    }
     ape_free(ident->value);
     ident->value = NULL;
     ident->pos = src_pos_invalid;
+    ape_free(ident);
 }
 
 if_case_t *if_case_make(expression_t *test, code_block_t *consequence) {
@@ -4449,7 +4455,7 @@ static expression_t* parse_prefix_expression(parser_t *p);
 static expression_t* parse_infix_expression(parser_t *p, expression_t *left);
 static expression_t* parse_grouped_expression(parser_t *p);
 static expression_t* parse_function_literal(parser_t *p);
-static bool parse_function_parameters(parser_t *p, array(ident_t) *out_params);
+static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params);
 static expression_t* parse_call_expression(parser_t *p, expression_t *left);
 static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t start_token, token_type_t end_token, bool trailing_comma_allowed);
 static expression_t* parse_index_expression(parser_t *p, expression_t *left);
@@ -4643,7 +4649,7 @@ static statement_t* parse_statement(parser_t *p) {
 }
 
 static statement_t* parse_define_statement(parser_t *p) {
-    ident_t name_ident;
+    ident_t *name_ident = NULL;
     expression_t *value = NULL;
 
     bool assignable = cur_token_is(p, TOKEN_VAR);
@@ -4670,13 +4676,13 @@ static statement_t* parse_define_statement(parser_t *p) {
     }
 
     if (value->type == EXPRESSION_FUNCTION_LITERAL) {
-        value->fn_literal.name = ape_strdup(name_ident.value);
+        value->fn_literal.name = ape_strdup(name_ident->value);
     }
 
     return statement_make_define(name_ident, value, assignable);
 err:
     expression_destroy(value);
-    ident_deinit(&name_ident);
+    ident_destroy(name_ident);
     return NULL;
 }
 
@@ -4867,12 +4873,11 @@ static statement_t* parse_recover_statement(parser_t *p) {
     }
     next_token(p);
 
-
     if (!expect_current(p, TOKEN_IDENT)) {
         return NULL;
     }
 
-    ident_t error_ident = ident_make(p->cur_token);
+    ident_t *error_ident = ident_make(p->cur_token);
     next_token(p);
 
     if (!expect_current(p, TOKEN_RPAREN)) {
@@ -4887,7 +4892,7 @@ static statement_t* parse_recover_statement(parser_t *p) {
 
     return statement_make_recover(error_ident, body);
 err:
-    ident_deinit(&error_ident);
+    ident_destroy(error_ident);
     return NULL;
 
 }
@@ -4910,7 +4915,7 @@ static statement_t* parse_for_loop_statement(parser_t *p) {
 
 static statement_t* parse_foreach(parser_t *p) {
     expression_t *source = NULL;
-    ident_t iterator_ident = ident_make(p->cur_token);
+    ident_t *iterator_ident = ident_make(p->cur_token);
 
     next_token(p);
 
@@ -4938,7 +4943,7 @@ static statement_t* parse_foreach(parser_t *p) {
 
     return statement_make_foreach(iterator_ident, source, body);
 err:
-    ident_deinit(&iterator_ident);
+    ident_destroy(iterator_ident);
     expression_destroy(source);
     return NULL;
 }
@@ -5006,8 +5011,7 @@ err:
 }
 
 static statement_t* parse_function_statement(parser_t *p) {
-    ident_t name_ident;
-
+    ident_t *name_ident = NULL;
     expression_t* value = NULL;
 
     src_pos_t pos = p->cur_token.pos;
@@ -5028,12 +5032,12 @@ static statement_t* parse_function_statement(parser_t *p) {
     }
 
     value->pos = pos;
-    value->fn_literal.name = ape_strdup(name_ident.value);
+    value->fn_literal.name = ape_strdup(name_ident->value);
 
     return statement_make_define(name_ident, value, false);
 err:
     expression_destroy(value);
-    ident_deinit(&name_ident);
+    ident_destroy(name_ident);
     return NULL;
 }
 
@@ -5121,7 +5125,7 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
 }
 
 static expression_t* parse_identifier(parser_t *p) {
-    ident_t ident = ident_make(p->cur_token);
+    ident_t *ident = ident_make(p->cur_token);
     expression_t *res = expression_make_ident(ident);
     next_token(p);
     return res;
@@ -5279,14 +5283,14 @@ static expression_t* parse_grouped_expression(parser_t *p) {
 
 static expression_t* parse_function_literal(parser_t *p) {
     p->depth += 1;
-    array(ident) *params = NULL;
+    ptrarray(ident) *params = NULL;
     code_block_t *body = NULL;
 
     if (cur_token_is(p, TOKEN_FUNCTION)) {
         next_token(p);
     }
 
-    params = array_make(ident_t);
+    params = ptrarray_make();
 
     bool ok = parse_function_parameters(p, params);
 
@@ -5303,12 +5307,13 @@ static expression_t* parse_function_literal(parser_t *p) {
 
     return expression_make_fn_literal(params, body);
 err:
-    array_destroy_with_items(params, ident_deinit);
+    code_block_destroy(body);
+    ptrarray_destroy_with_items(params, ident_destroy);
     p->depth -= 1;
     return NULL;
 }
 
-static bool parse_function_parameters(parser_t *p, array(ident_t) *out_params) {
+static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params) {
     if (!expect_current(p, TOKEN_LPAREN)) {
         return false;
     }
@@ -5324,8 +5329,8 @@ static bool parse_function_parameters(parser_t *p, array(ident_t) *out_params) {
         return false;
     }
 
-    ident_t ident = ident_make(p->cur_token);
-    array_add(out_params, &ident);
+    ident_t *ident = ident_make(p->cur_token);
+    ptrarray_add(out_params, ident);
 
     next_token(p);
 
@@ -5336,8 +5341,8 @@ static bool parse_function_parameters(parser_t *p, array(ident_t) *out_params) {
             return false;
         }
 
-        ident_t ident = ident_make(p->cur_token);
-        array_add(out_params, &ident);
+        ident_t *ident = ident_make(p->cur_token);
+        ptrarray_add(out_params, ident);
 
         next_token(p);
     }
@@ -6637,7 +6642,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
                 return false;
             }
             
-            symbol_t *symbol = define_symbol(comp, stmt->define.name.pos, stmt->define.name.value, stmt->define.assignable, false);
+            symbol_t *symbol = define_symbol(comp, stmt->define.name->pos, stmt->define.name->value, stmt->define.assignable, false);
             if (!symbol) {
                 return false;
             }
@@ -6785,10 +6790,10 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
             write_symbol(comp, index_symbol, true);
             symbol_t *source_symbol = NULL;
             if (foreach->source->type == EXPRESSION_IDENT) {
-                source_symbol = symbol_table_resolve(symbol_table, foreach->source->ident.value);
+                source_symbol = symbol_table_resolve(symbol_table, foreach->source->ident->value);
                 if (!source_symbol) {
                     error_t *err = error_makef(ERROR_COMPILATION, foreach->source->pos,
-                                              "Symbol \"%s\" could not be resolved", foreach->source->ident.value);
+                                              "Symbol \"%s\" could not be resolved", foreach->source->ident->value);
                     ptrarray_add(comp->errors, err);
                     return false;
                 }
@@ -6832,7 +6837,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
             read_symbol(comp, index_symbol);
             compiler_emit(comp, OPCODE_GET_VALUE_AT, 0, NULL);
 
-            symbol_t *iter_symbol  = define_symbol(comp, foreach->iterator.pos, foreach->iterator.value, false, false);
+            symbol_t *iter_symbol  = define_symbol(comp, foreach->iterator->pos, foreach->iterator->value, false, false);
             if (!iter_symbol) {
                 return false;
             }
@@ -6956,7 +6961,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
 
             symbol_table_push_block_scope(symbol_table);
 
-            symbol_t *error_symbol = define_symbol(comp, recover->error_ident.pos, recover->error_ident.value, false, false);
+            symbol_t *error_symbol = define_symbol(comp, recover->error_ident->pos, recover->error_ident->value, false, false);
             if (!error_symbol) {
                 return false;
             }
@@ -7124,7 +7129,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             break;
         }
         case EXPRESSION_IDENT: {
-            const ident_t *ident = &expr->ident;
+            const ident_t *ident = expr->ident;
             symbol_t *symbol = symbol_table_resolve(symbol_table, ident->value);
             if (!symbol) {
                 error_t *err = error_makef(ERROR_COMPILATION, ident->pos,
@@ -7173,8 +7178,8 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 goto error;
             }
 
-            for (int i = 0; i < array_count(expr->fn_literal.params); i++) {
-                ident_t *param = array_get(expr->fn_literal.params, i);
+            for (int i = 0; i < ptrarray_count(expr->fn_literal.params); i++) {
+                ident_t *param = ptrarray_get(expr->fn_literal.params, i);
                 symbol_t *param_symbol = define_symbol(comp, param->pos, param->value, true, false);
                 if (!param_symbol) {
                     goto error;
@@ -7202,7 +7207,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             symbol_table = compiler_get_symbol_table(comp);
             
             object_t obj = object_make_function(comp->mem, fn->name, comp_res, true,
-                                                num_locals, array_count(fn->params), 0);
+                                                num_locals, ptrarray_count(fn->params), 0);
 
             for (int i = 0; i < ptrarray_count(free_symbols); i++) {
                 symbol_t *symbol = ptrarray_get(free_symbols, i);
@@ -7251,7 +7256,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
             array_push(comp->src_positions_stack, &assign->dest->pos);
             if (assign->dest->type == EXPRESSION_IDENT) {
-                const ident_t *ident = &assign->dest->ident;
+                const ident_t *ident = assign->dest->ident;
                 symbol_t *symbol = symbol_table_resolve(symbol_table, ident->value);
                 if (!symbol) {
                     error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
@@ -10973,7 +10978,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 7
-#define APE_IMPL_VERSION_PATCH 4
+#define APE_IMPL_VERSION_PATCH 5
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\

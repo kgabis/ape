@@ -45,9 +45,9 @@ extern "C"
 
 #define APE_VERSION_MAJOR 0
 #define APE_VERSION_MINOR 7
-#define APE_VERSION_PATCH 4
+#define APE_VERSION_PATCH 5
 
-#define APE_VERSION_STRING "0.7.4"
+#define APE_VERSION_STRING "0.7.5"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
