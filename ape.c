@@ -26,6 +26,12 @@ THE SOFTWARE.
 
 #define APE_AMALGAMATED
 
+#ifdef _MSC_VER
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif /* _CRT_SECURE_NO_WARNINGS */
+#endif /* _MSC_VER */
+
 #include "ape.h"
 
 //-----------------------------------------------------------------------------
@@ -1566,9 +1572,9 @@ ape_timer_t ape_timer_start() {
 #elif defined(APE_WINDOWS)
     LARGE_INTEGER li;
     QueryPerformanceFrequency(&li); // not sure what to do if it fails
-    timer->pc_frequency = double(li.QuadPart) / 1000.0;
+    timer.pc_frequency = (double)(li.QuadPart) / 1000.0;
     QueryPerformanceCounter(&li);
-    timer->start_time_ms = li.QuadPart / timer->pc_frequency;
+    timer.start_time_ms = li.QuadPart / timer.pc_frequency;
 #elif defined(APE_EMSCRIPTEN)
     timer.start_time_ms = emscripten_get_now();
 #endif
@@ -6080,44 +6086,44 @@ int code_make(opcode_t op, int operands_count, uint64_t *operands, array(uint8_t
         int width = def->operand_widths[i];
         switch (width) {
             case 1: {
-                val = operands[i];
+                val = (uint8_t)(operands[i]);
                 array_add(res, &val);
                 break;
             }
             case 2: {
-                val = operands[i] >> 8;
+                val = (uint8_t)(operands[i] >> 8);
                 array_add(res, &val);
-                val = operands[i] >> 0;
+                val = (uint8_t)(operands[i] >> 0);
                 array_add(res, &val);
                 break;
             }
             case 4: {
-                val = operands[i] >> 24;
+                val = (uint8_t)(operands[i] >> 24);
                 array_add(res, &val);
-                val = operands[i] >> 16;
+                val = (uint8_t)(operands[i] >> 16);
                 array_add(res, &val);
-                val = operands[i] >> 8;
+                val = (uint8_t)(operands[i] >> 8);
                 array_add(res, &val);
-                val = operands[i] >> 0;
+                val = (uint8_t)(operands[i] >> 0);
                 array_add(res, &val);
                 break;
             }
             case 8: {
-                val = operands[i] >> 56;
+                val = (uint8_t)(operands[i] >> 56);
                 array_add(res, &val);
-                val = operands[i] >> 48;
+                val = (uint8_t)(operands[i] >> 48);
                 array_add(res, &val);
-                val = operands[i] >> 40;
+                val = (uint8_t)(operands[i] >> 40);
                 array_add(res, &val);
-                val = operands[i] >> 32;
+                val = (uint8_t)(operands[i] >> 32);
                 array_add(res, &val);
-                val = operands[i] >> 24;
+                val = (uint8_t)(operands[i] >> 24);
                 array_add(res, &val);
-                val = operands[i] >> 16;
+                val = (uint8_t)(operands[i] >> 16);
                 array_add(res, &val);
-                val = operands[i] >> 8;
+                val = (uint8_t)(operands[i] >> 8);
                 array_add(res, &val);
-                val = operands[i] >> 0;
+                val = (uint8_t)(operands[i] >> 0);
                 array_add(res, &val);
                 break;
             }
@@ -6298,8 +6304,8 @@ static expression_t* optimise_infix_expression(const expression_t* expr) {
     if (left_is_numeric && right_is_numeric) {
         double left_val = left->type == EXPRESSION_NUMBER_LITERAL ? left->number_literal : left->bool_literal;
         double right_val = right->type == EXPRESSION_NUMBER_LITERAL ? right->number_literal : right->bool_literal;
-        int64_t left_val_int = left_val;
-        int64_t right_val_int = right_val;
+        int64_t left_val_int = (int64_t)left_val;
+        int64_t right_val_int = (int64_t)right_val;
         switch (expr->infix.op) {
             case OPERATOR_PLUS:     { res = expression_make_number_literal(left_val + right_val); break; }
             case OPERATOR_MINUS:    { res = expression_make_number_literal(left_val - right_val); break; }
@@ -6312,11 +6318,11 @@ static expression_t* optimise_infix_expression(const expression_t* expr) {
             case OPERATOR_EQ:       { res = expression_make_bool_literal(APE_DBLEQ(left_val, right_val)); break; }
             case OPERATOR_NOT_EQ:   { res = expression_make_bool_literal(!APE_DBLEQ(left_val, right_val)); break; }
             case OPERATOR_MODULUS:  { res = expression_make_number_literal(fmod(left_val, right_val)); break; }
-            case OPERATOR_BIT_AND:  { res = expression_make_number_literal(left_val_int & right_val_int); break; }
-            case OPERATOR_BIT_OR:   { res = expression_make_number_literal(left_val_int | right_val_int); break; }
-            case OPERATOR_BIT_XOR:  { res = expression_make_number_literal(left_val_int ^ right_val_int); break; }
-            case OPERATOR_LSHIFT:   { res = expression_make_number_literal(left_val_int << right_val_int); break; }
-            case OPERATOR_RSHIFT:   { res = expression_make_number_literal(left_val_int >> right_val_int); break; }
+            case OPERATOR_BIT_AND:  { res = expression_make_number_literal((double)(left_val_int & right_val_int)); break; }
+            case OPERATOR_BIT_OR:   { res = expression_make_number_literal((double)(left_val_int | right_val_int)); break; }
+            case OPERATOR_BIT_XOR:  { res = expression_make_number_literal((double)(left_val_int ^ right_val_int)); break; }
+            case OPERATOR_LSHIFT:   { res = expression_make_number_literal((double)(left_val_int << right_val_int)); break; }
+            case OPERATOR_RSHIFT:   { res = expression_make_number_literal((double)(left_val_int >> right_val_int)); break; }
             default: {
                 break;
             }
@@ -7469,9 +7475,9 @@ static void change_uint16_operand(compiler_t *comp, int ip, uint16_t operand) {
         APE_ASSERT(false);
         return;
     }
-    uint8_t hi = operand >> 8;
+    uint8_t hi = (uint8_t)(operand >> 8);
     array_set(bytecode, ip, &hi);
-    uint8_t lo = operand;
+    uint8_t lo = (uint8_t)(operand);
     array_set(bytecode, ip + 1, &lo);
 }
 
@@ -8276,7 +8282,7 @@ double object_get_number(object_t obj) {
     if (object_is_number(obj)) { // todo: optimise? always return number?
         return obj.number;
     }
-    return obj.handle & (~OBJECT_HEADER_MASK);
+    return (double)(obj.handle & (~OBJECT_HEADER_MASK));
 }
 
 const char * object_get_string(object_t object) {
@@ -9373,14 +9379,14 @@ static object_t range_fn(vm_t *vm, void *data, int argc, object_t *args) {
     int step = 1;
 
     if (argc == 1) {
-        end = object_get_number(args[0]);
+        end = (int)object_get_number(args[0]);
     } else if (argc == 2) {
-        start = object_get_number(args[0]);
-        end = object_get_number(args[1]);
+        start = (int)object_get_number(args[0]);
+        end = (int)object_get_number(args[1]);
     } else if (argc == 3) {
-        start = object_get_number(args[0]);
-        end = object_get_number(args[1]);
-        step = object_get_number(args[2]);
+        start = (int)object_get_number(args[0]);
+        end = (int)object_get_number(args[1]);
+        step = (int)object_get_number(args[2]);
     } else {
         error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid, "Invalid number of arguments passed to range, got %d", argc);
         vm_set_runtime_error(vm, err);
@@ -9519,7 +9525,7 @@ static object_t remove_at_fn(vm_t *vm, void *data, int argc, object_t *args) {
     }
 
     object_type_t type = object_get_type(args[0]);
-    int ix = object_get_number(args[1]);
+    int ix = (int)object_get_number(args[1]);
 
     switch (type) {
         case OBJECT_ARRAY: {
@@ -9575,7 +9581,7 @@ static object_t random_seed_fn(vm_t *vm, void *data, int argc, object_t *args) {
     if (!CHECK_ARGS(vm, true, argc, args, OBJECT_NUMBER)) {
         return object_make_null();
     }
-    int seed = object_get_number(args[0]);
+    int seed = (int)object_get_number(args[0]);
     srand(seed);
     return object_make_bool(true);
 }
@@ -9612,7 +9618,7 @@ static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_null();
     }
     object_type_t arg_type = object_get_type(args[0]);
-    int index = object_get_number(args[1]);
+    int index = (int)object_get_number(args[1]);
     if (arg_type == OBJECT_ARRAY) {
         int len = object_get_array_length(args[0]);
         if (index < 0) {
@@ -10210,8 +10216,8 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     double right_val = object_get_number(right);
                     double left_val = object_get_number(left);
 
-                    int64_t left_val_int = left_val;
-                    int64_t right_val_int = right_val;
+                    int64_t left_val_int = (int64_t)left_val;
+                    int64_t right_val_int = (int64_t)right_val;
 
                     double res = 0;
                     switch (opcode) {
@@ -10220,11 +10226,11 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                         case OPCODE_MUL:    res = left_val * right_val; break;
                         case OPCODE_DIV:    res = left_val / right_val; break;
                         case OPCODE_MOD:    res = fmod(left_val, right_val); break;
-                        case OPCODE_OR:     res = left_val_int | right_val_int; break;
-                        case OPCODE_XOR:    res = left_val_int ^ right_val_int; break;
-                        case OPCODE_AND:    res = left_val_int & right_val_int; break;
-                        case OPCODE_LSHIFT: res = left_val_int << right_val_int; break;
-                        case OPCODE_RSHIFT: res = left_val_int >> right_val_int; break;
+                        case OPCODE_OR:     res = (double)(left_val_int | right_val_int); break;
+                        case OPCODE_XOR:    res = (double)(left_val_int ^ right_val_int); break;
+                        case OPCODE_AND:    res = (double)(left_val_int & right_val_int); break;
+                        case OPCODE_LSHIFT: res = (double)(left_val_int << right_val_int); break;
+                        case OPCODE_RSHIFT: res = (double)(left_val_int >> right_val_int); break;
                         default: APE_ASSERT(false); break;
                     }
                     stack_push(vm, object_make_number(res));
@@ -10716,7 +10722,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
         if (check_time) {
             time_check_counter++;
             if (time_check_counter > time_check_interval) {
-                int elapsed_ms = ape_timer_get_elapsed_ms(&timer);
+                int elapsed_ms = (int)ape_timer_get_elapsed_ms(&timer);
                 if (elapsed_ms > max_exec_time_ms) {
                     error_t *err = error_makef(ERROR_OUT_OF_TIME, frame_src_position(vm->current_frame), "Execution took more than %1.17g ms", max_exec_time_ms);
                     vm_set_runtime_error(vm, err);
@@ -11100,7 +11106,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 8
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
