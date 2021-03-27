@@ -23,6 +23,7 @@ static void test_fails(void);
 static void test_calling_functions(void);
 static void test_traceback(void);
 static void test_various(void);
+static void test_time_limit(void);
 
 static void *counted_malloc(size_t size);
 static void counted_free(void *ptr);
@@ -55,6 +56,7 @@ void api_test() {
     test_calling_functions();
     test_traceback();
     test_various();
+    test_time_limit();
     ape_set_memory_functions(malloc, free);
 }
 
@@ -418,8 +420,39 @@ static void test_various() {
 
     assert(isnan(nan1_retrieved));
     assert(ape_double_to_uint64(nan1_retrieved) == 0x7ff8000000000000);
-
 }
+
+static void test_time_limit() {
+    g_malloc_count = 0;
+
+    const char *tests[] = {
+        "while (true) {}",
+        "fn(){ while (true) {}}()"
+    };
+
+    for (int i = 0; i < APE_ARRAY_LEN(tests); i++) {
+        ape_t *ape = ape_make();
+        bool limit_set = ape_set_max_execution_time(ape, 1.0);
+        if (!limit_set) {
+            puts("CAN'T TEST MAX EXECUTION TIME");
+            return;
+        }
+
+        ape_set_stdout_write_function(ape, stdout_write, NULL);
+
+        ape_execute(ape, tests[i]);
+
+        assert(ape_has_errors(ape));
+        assert(ape_errors_count(ape) == 1);
+
+        const ape_error_t *err = ape_get_error(ape, 0);
+
+        assert(ape_error_get_type(err) == APE_ERROR_OUT_OF_TIME);
+        ape_destroy(ape);
+        assert(g_malloc_count == 0);
+    }
+}
+
 static void *counted_malloc(size_t size) {
     void *res = malloc(size);
     if (res != NULL) {

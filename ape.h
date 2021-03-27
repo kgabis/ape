@@ -44,10 +44,10 @@ extern "C"
 #endif
 
 #define APE_VERSION_MAJOR 0
-#define APE_VERSION_MINOR 7
-#define APE_VERSION_PATCH 5
+#define APE_VERSION_MINOR 8
+#define APE_VERSION_PATCH 0
 
-#define APE_VERSION_STRING "0.7.5"
+#define APE_VERSION_STRING "0.8.0"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
@@ -60,6 +60,7 @@ typedef enum ape_error_type {
     APE_ERROR_PARSING,
     APE_ERROR_COMPILATION,
     APE_ERROR_RUNTIME,
+    APE_ERROR_OUT_OF_TIME,
     APE_ERROR_USER, // from ape_add_error() or ape_add_errorf()
 } ape_error_type_t;
 
@@ -98,6 +99,12 @@ ape_t* ape_make(void);
 void   ape_destroy(ape_t *ape);
 
 void ape_set_repl_mode(ape_t *ape, bool enabled);
+
+// -1 to disable, returns false if it can't be set for current platform (otherwise true).
+// If execution time exceeds given limit an APE_ERROR_OUT_OF_TIME error is set.
+// Precision is not guaranteed because time can't be checked every VM tick
+// but expect it to be submilisecond.
+bool ape_set_max_execution_time(ape_t *ape, double max_execution_time_ms);
 
 void ape_set_stdout_write_function(ape_t *ape, ape_stdout_write_fn stdout_write, void *context);
 void ape_set_file_write_function(ape_t *ape, ape_write_file_fn file_write, void *context);

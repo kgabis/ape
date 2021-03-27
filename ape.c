@@ -42,6 +42,34 @@ THE SOFTWARE.
 #include <math.h>
 #include <float.h>
 
+#if defined(__linux__)
+    #define APE_LINUX
+    #define APE_POSIX
+#elif defined(_WIN32)
+    #define APE_WINDOWS
+#elif (defined(__APPLE__) && defined(__MACH__))
+    #define APE_APPLE
+    #define APE_POSIX
+#elif defined(__EMSCRIPTEN__)
+    #define APE_EMSCRIPTEN
+#endif
+
+#if defined(__unix__)
+#include <unistd.h>
+#if defined(_POSIX_VERSION)
+    #define APE_POSIX
+#endif
+#endif
+
+#if defined(APE_POSIX)
+#include <sys/time.h>
+#elif defined(APE_WINDOWS)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#elif defined(APE_EMSCRIPTEN)
+#include <emscripten/emscripten.h>
+#endif
+
 #ifndef APE_AMALGAMATED
 #include "ape.h"
 #endif
@@ -99,7 +127,19 @@ typedef struct ape_config {
     } fileio;
 
     bool repl_mode; // allows redefinition of symbols
+
+    double max_execution_time_ms;
+    bool max_execution_time_set;
 } ape_config_t;
+
+typedef struct ape_timer {
+#if defined(APE_POSIX)
+    int64_t start_offset;
+#elif defined(APE_WINDOWS)
+    double pc_frequency;
+#endif
+    double start_time_ms;
+} ape_timer_t;
 
 #ifndef APE_AMALGAMATED
 extern const src_pos_t src_pos_invalid;
@@ -114,6 +154,10 @@ APE_INTERNAL char* ape_strdup(const char *string);
 
 APE_INTERNAL uint64_t ape_double_to_uint64(double val);
 APE_INTERNAL double ape_uint64_to_double(uint64_t val);
+
+APE_INTERNAL bool ape_timer_platform_supported(void);
+APE_INTERNAL ape_timer_t ape_timer_start(void);
+APE_INTERNAL double ape_timer_get_elapsed_ms(const ape_timer_t *timer);
 
 extern ape_malloc_fn ape_malloc;
 extern ape_free_fn ape_free;
@@ -341,6 +385,7 @@ typedef enum error_type {
     ERROR_PARSING,
     ERROR_COMPILATION,
     ERROR_RUNTIME,
+    ERROR_OUT_OF_TIME,
     ERROR_USER,
 } error_type_t;
 
@@ -1395,7 +1440,7 @@ typedef struct vm {
 APE_INTERNAL vm_t* vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors); // ape can be null (for internal testing purposes)
 APE_INTERNAL void  vm_destroy(vm_t *vm);
 
-APE_INTERNAL void  vm_reset(vm_t *vm);
+APE_INTERNAL void vm_reset(vm_t *vm);
 
 APE_INTERNAL bool vm_run(vm_t *vm, compilation_result_t *comp_res, array(object_t) *constants);
 APE_INTERNAL object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc, object_t *args);
@@ -1499,6 +1544,55 @@ double ape_uint64_to_double(uint64_t val) {
         .val_uint64 = val
     };
     return temp.val_double;
+}
+
+bool ape_timer_platform_supported() {
+#if defined(APE_POSIX) || defined(APE_EMSCRIPTEN) || defined(APE_WINDOWS)
+    return true;
+#else
+    return false;
+#endif
+}
+
+ape_timer_t ape_timer_start() {
+    ape_timer_t timer;
+    memset(&timer, 0, sizeof(ape_timer_t));
+#if defined(APE_POSIX)
+    // At some point it should be replaced with more accurate per-platform timers
+    struct timeval start_time;
+    gettimeofday(&start_time, NULL);
+    timer.start_offset = start_time.tv_sec;
+    timer.start_time_ms = start_time.tv_usec / 1000.0;
+#elif defined(APE_WINDOWS)
+    LARGE_INTEGER li;
+    QueryPerformanceFrequency(&li); // not sure what to do if it fails
+    timer->pc_frequency = double(li.QuadPart) / 1000.0;
+    QueryPerformanceCounter(&li);
+    timer->start_time_ms = li.QuadPart / timer->pc_frequency;
+#elif defined(APE_EMSCRIPTEN)
+    timer.start_time_ms = emscripten_get_now();
+#endif
+    return timer;
+}
+
+double ape_timer_get_elapsed_ms(const ape_timer_t *timer) {
+#if defined(APE_POSIX)
+    struct timeval current_time;
+    gettimeofday(&current_time, NULL);
+    int time_s = (int)((int64_t)current_time.tv_sec - timer->start_offset);
+    double current_time_ms = (time_s * 1000) + (current_time.tv_usec / 1000.0);
+    return current_time_ms - timer->start_time_ms;
+#elif defined(APE_WINDOWS)
+    LARGE_INTEGER li;
+    QueryPerformanceCounter(&li);
+    double current_time_ms = li.QuadPart / timer->pc_frequency;
+    return current_time_ms - timer->start_time_ms;
+#elif defined(APE_EMSCRIPTEN)
+    double current_time_ms = emscripten_get_now();
+    return current_time_ms - timer->start_time_ms;
+#else
+    return 0;
+#endif
 }
 //FILE_END
 //FILE_START:collections.c
@@ -2995,11 +3089,12 @@ void error_destroy(error_t *error) {
 
 const char *error_type_to_string(error_type_t type) {
     switch (type) {
-        case ERROR_PARSING: return "PARSING";
+        case ERROR_PARSING:     return "PARSING";
         case ERROR_COMPILATION: return "COMPILATION";
-        case ERROR_RUNTIME: return "RUNTIME";
-        case ERROR_USER: return "USER";
-        default: return "INVALID";
+        case ERROR_RUNTIME:     return "RUNTIME";
+        case ERROR_OUT_OF_TIME: return "OUT_OF_TIME";
+        case ERROR_USER:        return "USER";
+        default:                return "INVALID";
     }
 }
 //FILE_END
@@ -10067,6 +10162,20 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
     vm->running = true;
     vm->last_popped = object_make_null();
 
+    bool check_time = false;
+    double max_exec_time_ms = 0;
+    if (vm->config) {
+        check_time = vm->config->max_execution_time_set;
+        max_exec_time_ms = vm->config->max_execution_time_ms;
+    }
+    unsigned time_check_interval = 1000;
+    unsigned time_check_counter = 0;
+    ape_timer_t timer;
+    memset(&timer, 0, sizeof(ape_timer_t));
+    if (check_time) {
+        timer = ape_timer_start();
+    }
+
     while (vm->current_frame->ip < vm->current_frame->bytecode_size) {
         opcode_val_t opcode = frame_read_opcode(vm->current_frame);
         switch (opcode) {
@@ -10603,6 +10712,19 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 goto err;
             }
         }
+
+        if (check_time) {
+            time_check_counter++;
+            if (time_check_counter > time_check_interval) {
+                int elapsed_ms = ape_timer_get_elapsed_ms(&timer);
+                if (elapsed_ms > max_exec_time_ms) {
+                    error_t *err = error_makef(ERROR_OUT_OF_TIME, frame_src_position(vm->current_frame), "Execution took more than %1.17g ms", max_exec_time_ms);
+                    vm_set_runtime_error(vm, err);
+                    goto err;
+                }
+                time_check_counter = 0;
+            }
+        }
     err:
         if (vm->runtime_error != NULL) {
             int recover_frame_ix = -1;
@@ -10977,8 +11099,8 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 7
-#define APE_IMPL_VERSION_PATCH 5
+#define APE_IMPL_VERSION_MINOR 8
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
@@ -11093,6 +11215,23 @@ void ape_destroy(ape_t *ape) {
 
 void ape_set_repl_mode(ape_t *ape, bool enabled) {
     ape->config.repl_mode = enabled;
+}
+
+bool ape_set_max_execution_time(ape_t *ape, double max_execution_time_ms) {
+    if (!ape_timer_platform_supported()) {
+        ape->config.max_execution_time_ms = 0;
+        ape->config.max_execution_time_set = false;
+        return false;
+    }
+
+    if (max_execution_time_ms >= 0) {
+        ape->config.max_execution_time_ms = max_execution_time_ms;
+        ape->config.max_execution_time_set = true;
+    } else {
+        ape->config.max_execution_time_ms = 0;
+        ape->config.max_execution_time_set = false;
+    }
+    return true;
 }
 
 void ape_set_stdout_write_function(ape_t *ape, ape_stdout_write_fn stdout_write, void *context) {
@@ -11773,12 +11912,13 @@ int ape_error_get_column_number(const ape_error_t *ape_error) {
 ape_error_type_t ape_error_get_type(const ape_error_t *ape_error) {
     const error_t *error = (const error_t*)ape_error;
     switch (error->type) {
-        case ERROR_NONE: return APE_ERROR_NONE;
-        case ERROR_PARSING: return APE_ERROR_PARSING;
+        case ERROR_NONE:        return APE_ERROR_NONE;
+        case ERROR_PARSING:     return APE_ERROR_PARSING;
         case ERROR_COMPILATION: return APE_ERROR_COMPILATION;
-        case ERROR_RUNTIME: return APE_ERROR_RUNTIME;
-        case ERROR_USER: return APE_ERROR_USER;
-        default: return APE_ERROR_NONE;
+        case ERROR_RUNTIME:     return APE_ERROR_RUNTIME;
+        case ERROR_OUT_OF_TIME: return APE_ERROR_OUT_OF_TIME;
+        case ERROR_USER:        return APE_ERROR_USER;
+        default:                return APE_ERROR_NONE;
     }
 }
 
@@ -11788,11 +11928,12 @@ const char* ape_error_get_type_string(const ape_error_t *error) {
 
 const char* ape_error_type_to_string(ape_error_type_t type) {
     switch (type) {
-        case APE_ERROR_PARSING: return "PARSING";
+        case APE_ERROR_PARSING:     return "PARSING";
         case APE_ERROR_COMPILATION: return "COMPILATION";
-        case APE_ERROR_RUNTIME: return "RUNTIME";
-        case APE_ERROR_USER: return "USER";
-        default: return "NONE";
+        case APE_ERROR_RUNTIME:     return "RUNTIME";
+        case APE_ERROR_OUT_OF_TIME: return "OUT_OF_TIME";
+        case APE_ERROR_USER:        return "USER";
+        default:                    return "NONE";
     }
 }
 
@@ -11913,6 +12054,7 @@ static void reset_state(ape_t *ape) {
 static void set_default_config(ape_t *ape) {
     memset(&ape->config, 0, sizeof(ape_config_t));
     ape_set_repl_mode(ape, false);
+    ape_set_max_execution_time(ape, -1);
     ape_set_file_read_function(ape, read_file_default, NULL);
     ape_set_file_write_function(ape, write_file_default, NULL);
     ape_set_stdout_write_function(ape, stdout_write_default, NULL);
