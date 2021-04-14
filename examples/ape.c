@@ -22,9 +22,9 @@ int main(int argc, char *argv[]) {
         int count = ape_errors_count(ape);
         for (int i = 0; i < count; i++) {
             const ape_error_t *err = ape_get_error(ape, i);
-            char *err_str = ape_error_serialize(err);
+            char *err_str = ape_error_serialize(ape, err);
             fprintf(stderr, "%s", err_str);
-            free(err_str);
+            ape_free_allocated(ape, err_str);
         }
     }
     ape_destroy(ape);

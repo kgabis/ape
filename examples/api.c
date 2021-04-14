@@ -24,9 +24,9 @@ int main() {
     assert(ape_has_errors(ape));
     for (int i = 0; i < ape_errors_count(ape); i++) {
         const ape_error_t *err = ape_get_error(ape, i);
-        char *err_string = ape_error_serialize(err);
+        char *err_string = ape_error_serialize(ape, err);
         puts(err_string);
-        free(err_string);
+        ape_free_allocated(ape, err_string);
     }
 
     ape_destroy(ape);

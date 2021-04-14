@@ -82,7 +82,7 @@ void parser_test() {
 static ptrarray(statement_t)* parse(const char *code) {
     ape_config_t *config = malloc(sizeof(ape_config_t));
     config->repl_mode = true;
-    parser_t *parser = parser_make(config, ptrarray_make());
+    parser_t *parser = parser_make(NULL, config, ptrarray_make(NULL));
 
     ptrarray(statement_t)* statements = parser_parse_all(parser, code, NULL);
 
@@ -139,7 +139,7 @@ static void test_define_statements() {
         assert(APE_STREQ(def_stmt->name->value, test.expected_ident));
         assert(def_stmt->assignable == test.assignable);
 
-        strbuf_t *buf = strbuf_make();
+        strbuf_t *buf = strbuf_make(NULL);
         expression_to_string(def_stmt->value, buf);
         const char *val_str = strbuf_get_string(buf);
         assert(APE_STREQ(val_str, test.expected_val));
@@ -169,20 +169,20 @@ return\
 }
 
 static void test_string() {
-    ptrarray(statement_t)* statements = ptrarray_make();
+    ptrarray(statement_t)* statements = ptrarray_make(NULL);
 
-    expression_t *expr = expression_make_ident(ident_make((token_t){
+    expression_t *expr = expression_make_ident(NULL, ident_make(NULL, (token_t){
         .literal = "anotherVar",
         .len = strlen("anotherVar")
     }));
-    statement_t *stmt = statement_make_define(ident_make((token_t){
+    statement_t *stmt = statement_make_define(NULL, ident_make(NULL, (token_t){
         .literal = "myVar",
         .len = strlen("myVar")
     }), expr, false);
 
     ptrarray_add(statements, stmt);
 
-    char *program_string = statements_to_string(statements);
+    char *program_string = statements_to_string(NULL, statements);
     assert(APE_STREQ(program_string, "const myVar = anotherVar"));
     free(program_string);
 
@@ -489,14 +489,14 @@ static void test_operator_precedence() {
         ptrarray(statement_t)* statements = parse(input);
         assert(statements);
 
-        char *actual = statements_to_string(statements);
+        char *actual = statements_to_string(NULL, statements);
         assert(APE_STREQ(actual, expected));
         free(actual);
     }
 }
 
 static void test_expression(expression_t *expr, const char *value) {
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(NULL);
     expression_to_string(expr, buf);
     const char *str = strbuf_get_string(buf);
     assert(APE_STREQ(str, value));
@@ -590,7 +590,7 @@ static void test_fn_literal_parsing() {
 
     code_block_t *body_stmt = fn->body;
     assert(body_stmt);
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(NULL);
     code_block_to_string(body_stmt, buf);
     const char *str = strbuf_get_string(buf);
     assert(APE_STREQ(str, "{ return (x + y)\n }"));
@@ -619,7 +619,7 @@ static void test_call_expr_parsing() {
 #define TEST_ARGUMENT(n, str)\
 do { \
     expression_t *arg_expr = ptrarray_get(call_expr->args, n);\
-    strbuf_t *buf = strbuf_make();\
+    strbuf_t *buf = strbuf_make(NULL);\
     expression_to_string(arg_expr, buf);\
     const char *buf_str = strbuf_get_string(buf);\
     assert(APE_STREQ(buf_str, str));\
@@ -652,7 +652,7 @@ static void test_array_literal_parsing() {
 #define TEST_ELEMENT(n, str)\
 do { \
     expression_t *arr_expr = ptrarray_get(array, n);\
-    strbuf_t *buf = strbuf_make();\
+    strbuf_t *buf = strbuf_make(NULL);\
     expression_to_string(arr_expr, buf);\
     const char *buf_str = strbuf_get_string(buf);\
     assert(APE_STREQ(buf_str, str));\
@@ -683,7 +683,7 @@ static void test_index_expr_parsing() {
     assert(index_expr->left->type == EXPRESSION_IDENT);
     assert(APE_STREQ(index_expr->left->ident->value, "myArray"));
 
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(NULL);
     expression_to_string(index_expr->index, buf);
     const char *val_str = strbuf_get_string(buf);
     assert(APE_STREQ(val_str, "(1 + 1)"));
@@ -707,7 +707,7 @@ static void test_dot_expr_parsing() {
     assert(index_expr->left->type == EXPRESSION_IDENT);
     assert(APE_STREQ(index_expr->left->ident->value, "myObj"));
 
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(NULL);
     expression_to_string(index_expr->index, buf);
     const char *val_str = strbuf_get_string(buf);
     assert(APE_STREQ(val_str, "\"foo\""));
@@ -731,13 +731,13 @@ static void test_map_literal_parsing() {
 #define TEST_ELEMENT(n, key, val)\
 do { \
     expression_t *key_expr = ptrarray_get(map->keys, n);\
-    strbuf_t *buf = strbuf_make();\
+    strbuf_t *buf = strbuf_make(NULL);\
     expression_to_string(key_expr, buf);\
     const char *buf_str = strbuf_get_string(buf);\
     assert(APE_STREQ(buf_str, key));\
     strbuf_destroy(buf);\
     expression_t *val_expr = ptrarray_get(map->values, n);\
-    buf = strbuf_make();\
+    buf = strbuf_make(NULL);\
     expression_to_string(val_expr, buf);\
     buf_str = strbuf_get_string(buf);\
     assert(APE_STREQ(buf_str, val));\

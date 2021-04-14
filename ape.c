@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT
 
 ape
 https://github.com/kgabis/ape
-Copyright (c) 2020 Krzysztof Gabis
+Copyright (c) 2021 Krzysztof Gabis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -102,15 +102,13 @@ THE SOFTWARE.
 #endif
 
 typedef struct compiled_file compiled_file_t;
+typedef struct allocator allocator_t;
 
 typedef struct src_pos {
     const compiled_file_t *file;
     int line;
     int column;
 } src_pos_t;
-
-typedef void * (*ape_malloc_fn)(size_t size);
-typedef void (*ape_free_fn)(void *ptr);
 
 typedef struct ape_config {
     struct {
@@ -153,10 +151,10 @@ extern const src_pos_t src_pos_zero;
 #endif
 
 APE_INTERNAL src_pos_t src_pos_make(const compiled_file_t *file, int line, int column);
-APE_INTERNAL char *ape_stringf(const char *format, ...);
+APE_INTERNAL char *ape_stringf(allocator_t *alloc, const char *format, ...);
 APE_INTERNAL void ape_log(const char *file, int line, const char *format, ...);
-APE_INTERNAL char* ape_strndup(const char *string, size_t n);
-APE_INTERNAL char* ape_strdup(const char *string);
+APE_INTERNAL char* ape_strndup(allocator_t *alloc, const char *string, size_t n);
+APE_INTERNAL char* ape_strdup(allocator_t *alloc, const char *string);
 
 APE_INTERNAL uint64_t ape_double_to_uint64(double val);
 APE_INTERNAL double ape_uint64_to_double(uint64_t val);
@@ -164,9 +162,6 @@ APE_INTERNAL double ape_uint64_to_double(uint64_t val);
 APE_INTERNAL bool ape_timer_platform_supported(void);
 APE_INTERNAL ape_timer_t ape_timer_start(void);
 APE_INTERNAL double ape_timer_get_elapsed_ms(const ape_timer_t *timer);
-
-extern ape_malloc_fn ape_malloc;
-extern ape_free_fn ape_free;
 
 #endif /* common_h */
 //FILE_END
@@ -187,12 +182,25 @@ extern ape_free_fn ape_free;
 // Collections
 //-----------------------------------------------------------------------------
 
-typedef void * (*collections_malloc_fn)(size_t size);
-typedef void (*collections_free_fn)(void *ptr);
 typedef unsigned long (*collections_hash_fn)(const void* val);
 typedef bool (*collections_equals_fn)(const void *a, const void *b);
 
-COLLECTIONS_API void collections_set_memory_functions(collections_malloc_fn malloc_fn, collections_free_fn free_fn);
+//-----------------------------------------------------------------------------
+// Allocator
+//-----------------------------------------------------------------------------
+
+typedef void * (*allocator_malloc_fn)(void *ctx, size_t size);
+typedef void (*allocator_free_fn)(void *ctx, void *ptr);
+
+typedef struct allocator {
+    allocator_malloc_fn malloc;
+    allocator_free_fn free;
+    void *ctx;
+} allocator_t;
+
+COLLECTIONS_API allocator_t allocator_make(allocator_malloc_fn malloc_fn, allocator_free_fn free_fn, void *ctx);
+COLLECTIONS_API void* allocator_malloc(allocator_t *allocator, size_t size);
+COLLECTIONS_API void  allocator_free(allocator_t *allocator, void *ptr);
 
 //-----------------------------------------------------------------------------
 // Dictionary
@@ -208,7 +216,7 @@ typedef void (*dict_item_destroy_fn)(void* item);
 typedef void* (*dict_item_copy_fn)(void* item);
 #define dict_copy_with_items(dict, fn) dict_copy_with_items_(dict, (dict_item_copy_fn)(fn))
 
-COLLECTIONS_API dict_t_*     dict_make(void);
+COLLECTIONS_API dict_t_*     dict_make(allocator_t *alloc);
 COLLECTIONS_API void         dict_destroy(dict_t_ *dict);
 COLLECTIONS_API void         dict_destroy_with_items_(dict_t_ *dict, dict_item_destroy_fn destroy_fn);
 COLLECTIONS_API dict_t_*     dict_copy_with_items_(dict_t_ *dict, dict_item_copy_fn copy_fn);
@@ -228,10 +236,10 @@ typedef struct valdict_ valdict_t_;
 
 #define valdict(KEY_TYPE, VALUE_TYPE) valdict_t_
 
-#define valdict_make(key_type, val_type) valdict_make_(sizeof(key_type), sizeof(val_type))
+#define valdict_make(allocator, key_type, val_type) valdict_make_(allocator, sizeof(key_type), sizeof(val_type))
 
-COLLECTIONS_API valdict_t_*  valdict_make_(size_t key_size, size_t val_size);
-COLLECTIONS_API valdict_t_*  valdict_make_with_capacity(unsigned int min_capacity, size_t key_size, size_t val_size);
+COLLECTIONS_API valdict_t_*  valdict_make_(allocator_t *alloc, size_t key_size, size_t val_size);
+COLLECTIONS_API valdict_t_*  valdict_make_with_capacity(allocator_t *alloc, unsigned int min_capacity, size_t key_size, size_t val_size);
 COLLECTIONS_API void         valdict_destroy(valdict_t_ *dict);
 COLLECTIONS_API void         valdict_set_hash_function(valdict_t_ *dict, collections_hash_fn hash_fn);
 COLLECTIONS_API void         valdict_set_equals_function(valdict_t_ *dict, collections_equals_fn equals_fn);
@@ -253,7 +261,7 @@ typedef struct ptrdict_ ptrdict_t_;
 
 #define ptrdict(KEY_TYPE, VALUE_TYPE) ptrdict_t_
 
-COLLECTIONS_API ptrdict_t_* ptrdict_make(void);
+COLLECTIONS_API ptrdict_t_* ptrdict_make(allocator_t *alloc);
 COLLECTIONS_API void        ptrdict_destroy(ptrdict_t_ *dict);
 COLLECTIONS_API void        ptrdict_set_hash_function(ptrdict_t_ *dict, collections_hash_fn hash_fn);
 COLLECTIONS_API void        ptrdict_set_equals_function(ptrdict_t_ *dict, collections_equals_fn equals_fn);
@@ -273,13 +281,13 @@ typedef struct array_ array_t_;
 
 #define array(TYPE) array_t_
 
-#define array_make(type) array_make_(sizeof(type))
+#define array_make(allocator, type) array_make_(allocator, sizeof(type))
 typedef void (*array_item_deinit_fn)(void* item);
 #define array_destroy_with_items(arr, fn) array_destroy_with_items_(arr, (array_item_deinit_fn)(fn))
 #define array_clear_and_deinit_items(arr, fn) array_clear_and_deinit_items_(arr, (array_item_deinit_fn)(fn))
 
-COLLECTIONS_API array_t_*    array_make_(size_t element_size);
-COLLECTIONS_API array_t_*    array_make_with_capacity(unsigned int capacity, size_t element_size);
+COLLECTIONS_API array_t_*    array_make_(allocator_t *alloc, size_t element_size);
+COLLECTIONS_API array_t_*    array_make_with_capacity(allocator_t *alloc, unsigned int capacity, size_t element_size);
 COLLECTIONS_API void         array_destroy(array_t_ *arr);
 COLLECTIONS_API void         array_destroy_with_items_(array_t_ *arr, array_item_deinit_fn deinit_fn);
 COLLECTIONS_API array_t_*    array_copy(const array_t_ *arr);
@@ -322,8 +330,8 @@ typedef void (*ptrarray_item_destroy_fn)(void* item);
 typedef void* (*ptrarray_item_copy_fn)(void* item);
 #define ptrarray_copy_with_items(arr, fn) ptrarray_copy_with_items_(arr, (ptrarray_item_copy_fn)(fn))
 
-COLLECTIONS_API ptrarray_t_* ptrarray_make(void);
-COLLECTIONS_API ptrarray_t_* ptrarray_make_with_capacity(unsigned int capacity);
+COLLECTIONS_API ptrarray_t_* ptrarray_make(allocator_t *alloc);
+COLLECTIONS_API ptrarray_t_* ptrarray_make_with_capacity(allocator_t *alloc, unsigned int capacity);
 COLLECTIONS_API void         ptrarray_destroy(ptrarray_t_ *arr);
 COLLECTIONS_API void         ptrarray_destroy_with_items_(ptrarray_t_ *arr, ptrarray_item_destroy_fn destroy_fn);
 COLLECTIONS_API ptrarray_t_* ptrarray_copy(ptrarray_t_ *arr);
@@ -353,8 +361,8 @@ COLLECTIONS_API void         ptrarray_reverse(ptrarray_t_ *arr);
 
 typedef struct strbuf strbuf_t;
 
-COLLECTIONS_API strbuf_t* strbuf_make(void);
-COLLECTIONS_API strbuf_t* strbuf_make_with_capacity(unsigned int capacity);
+COLLECTIONS_API strbuf_t* strbuf_make(allocator_t *alloc);
+COLLECTIONS_API strbuf_t* strbuf_make_with_capacity(allocator_t *alloc, unsigned int capacity);
 COLLECTIONS_API void strbuf_destroy(strbuf_t *buf);
 COLLECTIONS_API void strbuf_clear(strbuf_t *buf);
 COLLECTIONS_API bool strbuf_append(strbuf_t *buf, const char *str);
@@ -367,9 +375,9 @@ COLLECTIONS_API char * strbuf_get_string_and_destroy(strbuf_t *buf);
 // Utils
 //-----------------------------------------------------------------------------
 
-COLLECTIONS_API ptrarray(char)* kg_split_string(const char *str, const char *delimiter);
-COLLECTIONS_API char* kg_join(ptrarray(char) *items, const char *with);
-COLLECTIONS_API char* kg_canonicalise_path(const char *path);
+COLLECTIONS_API ptrarray(char)* kg_split_string(allocator_t *alloc, const char *str, const char *delimiter);
+COLLECTIONS_API char* kg_join(allocator_t *alloc, ptrarray(char) *items, const char *with);
+COLLECTIONS_API char* kg_canonicalise_path(allocator_t *alloc, const char *path);
 COLLECTIONS_API bool  kg_is_path_absolute(const char *path);
 COLLECTIONS_API bool  kg_streq(const char *a, const char *b);
 
@@ -391,20 +399,23 @@ typedef enum error_type {
     ERROR_PARSING,
     ERROR_COMPILATION,
     ERROR_RUNTIME,
-    ERROR_OUT_OF_TIME,
+    ERROR_TIMEOUT,
+    ERROR_ALLOCATION,
     ERROR_USER,
 } error_type_t;
 
 typedef struct error {
+    allocator_t *alloc;
     error_type_t type;
     char *message;
     src_pos_t pos;
     traceback_t *traceback;
 } error_t;
 
-APE_INTERNAL error_t* error_make_no_copy(error_type_t type, src_pos_t pos, char *message);
-APE_INTERNAL error_t* error_make(error_type_t type, src_pos_t pos, const char *message);
-APE_INTERNAL error_t* error_makef(error_type_t type, src_pos_t pos, const char *format, ...) __attribute__ ((format (printf, 3, 4)));
+APE_INTERNAL error_t* error_make_no_copy(allocator_t *alloc, error_type_t type, src_pos_t pos, char *message);
+APE_INTERNAL error_t* error_make(allocator_t *alloc, error_type_t type, src_pos_t pos, const char *message);
+APE_INTERNAL error_t* error_makef(allocator_t *alloc, error_type_t type, src_pos_t pos, const char *format, ...) __attribute__ ((format (printf, 4, 5)));
+APE_INTERNAL error_t error_make_allocation_error(void); // only because allocation errors cannot be allocated
 APE_INTERNAL void error_destroy(error_t *error);
 APE_INTERNAL const char *error_type_to_string(error_type_t type);
 
@@ -506,7 +517,7 @@ typedef struct token {
 } token_t;
 
 APE_INTERNAL void token_make(token_t *tok, token_type_t type, const char *literal, int len); // no need to destroy
-APE_INTERNAL char *token_duplicate_literal(const token_t *tok);
+APE_INTERNAL char *token_duplicate_literal(allocator_t *alloc, const token_t *tok);
 APE_INTERNAL const char *token_type_to_string(token_type_t type);
 
 #endif /* token_h */
@@ -524,6 +535,7 @@ APE_INTERNAL const char *token_type_to_string(token_type_t type);
 #endif
 
 typedef struct lexer {
+    allocator_t *alloc;
     const char *input;
     int input_len;
     int position;
@@ -534,7 +546,7 @@ typedef struct lexer {
     compiled_file_t *file;
 } lexer_t;
 
-APE_INTERNAL bool lexer_init(lexer_t *lex, const char *input, compiled_file_t *file); // no need to deinit
+APE_INTERNAL bool lexer_init(lexer_t *lex, allocator_t *alloc, const char *input, compiled_file_t *file); // no need to deinit
 
 APE_INTERNAL token_t lexer_next_token(lexer_t *lex);
 
@@ -551,6 +563,7 @@ APE_INTERNAL token_t lexer_next_token(lexer_t *lex);
 #endif
 
 typedef struct code_block {
+    allocator_t *alloc;
     ptrarray(statement_t) *statements;
 } code_block_t;
 
@@ -598,6 +611,7 @@ typedef struct infix {
 } infix_expression_t;
 
 typedef struct if_case {
+    allocator_t *alloc;
     expression_t *test;
     code_block_t *consequence;
 } if_case_t;
@@ -648,11 +662,13 @@ typedef enum expression_type {
 } expression_type_t;
 
 typedef struct ident {
+    allocator_t *alloc;
     char *value;
     src_pos_t pos;
 } ident_t;
 
 typedef struct expression {
+    allocator_t *alloc;
     expression_type_t type;
     union {
         ident_t *ident;
@@ -727,6 +743,7 @@ typedef struct recover_statement {
 } recover_statement_t;
 
 typedef struct statement {
+    allocator_t *alloc;
     statement_type_t type;
     union {
         define_statement_t define;
@@ -743,47 +760,47 @@ typedef struct statement {
     src_pos_t pos;
 } statement_t;
 
-APE_INTERNAL char* statements_to_string(ptrarray(statement_t) *statements);
+APE_INTERNAL char* statements_to_string(allocator_t *alloc, ptrarray(statement_t) *statements);
 
-APE_INTERNAL statement_t* statement_make_define(ident_t *name, expression_t *value, bool assignable);
-APE_INTERNAL statement_t* statement_make_if(ptrarray(if_case_t) *cases, code_block_t *alternative);
-APE_INTERNAL statement_t* statement_make_return(expression_t *value);
-APE_INTERNAL statement_t* statement_make_expression(expression_t *value);
-APE_INTERNAL statement_t* statement_make_while_loop(expression_t *test, code_block_t *body);
-APE_INTERNAL statement_t* statement_make_break(void);
-APE_INTERNAL statement_t* statement_make_foreach(ident_t *iterator, expression_t *source, code_block_t *body);
-APE_INTERNAL statement_t* statement_make_for_loop(statement_t *init, expression_t *test, expression_t *update, code_block_t *body);
-APE_INTERNAL statement_t* statement_make_continue(void);
-APE_INTERNAL statement_t* statement_make_block(code_block_t *block);
-APE_INTERNAL statement_t* statement_make_import(char *path);
-APE_INTERNAL statement_t* statement_make_recover(ident_t *error_ident, code_block_t *body);
+APE_INTERNAL statement_t* statement_make_define(allocator_t *alloc, ident_t *name, expression_t *value, bool assignable);
+APE_INTERNAL statement_t* statement_make_if(allocator_t *alloc, ptrarray(if_case_t) *cases, code_block_t *alternative);
+APE_INTERNAL statement_t* statement_make_return(allocator_t *alloc, expression_t *value);
+APE_INTERNAL statement_t* statement_make_expression(allocator_t *alloc, expression_t *value);
+APE_INTERNAL statement_t* statement_make_while_loop(allocator_t *alloc, expression_t *test, code_block_t *body);
+APE_INTERNAL statement_t* statement_make_break(allocator_t *alloc);
+APE_INTERNAL statement_t* statement_make_foreach(allocator_t *alloc, ident_t *iterator, expression_t *source, code_block_t *body);
+APE_INTERNAL statement_t* statement_make_for_loop(allocator_t *alloc, statement_t *init, expression_t *test, expression_t *update, code_block_t *body);
+APE_INTERNAL statement_t* statement_make_continue(allocator_t *alloc);
+APE_INTERNAL statement_t* statement_make_block(allocator_t *alloc, code_block_t *block);
+APE_INTERNAL statement_t* statement_make_import(allocator_t *alloc, char *path);
+APE_INTERNAL statement_t* statement_make_recover(allocator_t *alloc, ident_t *error_ident, code_block_t *body);
 
 APE_INTERNAL void statement_destroy(statement_t *stmt);
 
 APE_INTERNAL statement_t* statement_copy(const statement_t *stmt);
 
-APE_INTERNAL code_block_t* code_block_make(ptrarray(statement_t) *statements);
+APE_INTERNAL code_block_t* code_block_make(allocator_t *alloc, ptrarray(statement_t) *statements);
 APE_INTERNAL void code_block_destroy(code_block_t *stmt);
 APE_INTERNAL code_block_t* code_block_copy(code_block_t *block);
 
-APE_INTERNAL expression_t* expression_make_ident(ident_t *ident);
-APE_INTERNAL expression_t* expression_make_number_literal(double val);
-APE_INTERNAL expression_t* expression_make_bool_literal(bool val);
-APE_INTERNAL expression_t* expression_make_string_literal(char *value);
-APE_INTERNAL expression_t* expression_make_null_literal(void);
-APE_INTERNAL expression_t* expression_make_array_literal(ptrarray(expression_t) *values);
-APE_INTERNAL expression_t* expression_make_map_literal(ptrarray(expression_t) *keys, ptrarray(expression_t) *values);
-APE_INTERNAL expression_t* expression_make_prefix(operator_t op, expression_t *right);
-APE_INTERNAL expression_t* expression_make_infix(operator_t op, expression_t *left, expression_t *right);
-APE_INTERNAL expression_t* expression_make_fn_literal(ptrarray(ident_t) *params, code_block_t *body);
-APE_INTERNAL expression_t* expression_make_call(expression_t *function, ptrarray(expression_t) *args);
-APE_INTERNAL expression_t* expression_make_index(expression_t *left, expression_t *index);
-APE_INTERNAL expression_t* expression_make_assign(expression_t *dest, expression_t *source);
-APE_INTERNAL expression_t* expression_make_logical(operator_t op, expression_t *left, expression_t *right);
+APE_INTERNAL expression_t* expression_make_ident(allocator_t *alloc, ident_t *ident);
+APE_INTERNAL expression_t* expression_make_number_literal(allocator_t *alloc, double val);
+APE_INTERNAL expression_t* expression_make_bool_literal(allocator_t *alloc, bool val);
+APE_INTERNAL expression_t* expression_make_string_literal(allocator_t *alloc, char *value);
+APE_INTERNAL expression_t* expression_make_null_literal(allocator_t *alloc);
+APE_INTERNAL expression_t* expression_make_array_literal(allocator_t *alloc, ptrarray(expression_t) *values);
+APE_INTERNAL expression_t* expression_make_map_literal(allocator_t *alloc, ptrarray(expression_t) *keys, ptrarray(expression_t) *values);
+APE_INTERNAL expression_t* expression_make_prefix(allocator_t *alloc, operator_t op, expression_t *right);
+APE_INTERNAL expression_t* expression_make_infix(allocator_t *alloc, operator_t op, expression_t *left, expression_t *right);
+APE_INTERNAL expression_t* expression_make_fn_literal(allocator_t *alloc, ptrarray(ident_t) *params, code_block_t *body);
+APE_INTERNAL expression_t* expression_make_call(allocator_t *alloc, expression_t *function, ptrarray(expression_t) *args);
+APE_INTERNAL expression_t* expression_make_index(allocator_t *alloc, expression_t *left, expression_t *index);
+APE_INTERNAL expression_t* expression_make_assign(allocator_t *alloc, expression_t *dest, expression_t *source);
+APE_INTERNAL expression_t* expression_make_logical(allocator_t *alloc, operator_t op, expression_t *left, expression_t *right);
 
 APE_INTERNAL void expression_destroy(expression_t *expr);
 
-APE_INTERNAL expression_t* expression_copy(const expression_t *expr);
+APE_INTERNAL expression_t* expression_copy(expression_t *expr);
 
 APE_INTERNAL void statement_to_string(const statement_t *stmt, strbuf_t *buf);
 APE_INTERNAL void expression_to_string(expression_t *expr, strbuf_t *buf);
@@ -793,13 +810,11 @@ APE_INTERNAL const char* operator_to_string(operator_t op);
 
 APE_INTERNAL const char *expression_type_to_string(expression_type_t type);
 
-APE_INTERNAL void fn_literal_deinit(fn_literal_t *fn);
-
-APE_INTERNAL ident_t* ident_make(token_t tok);
+APE_INTERNAL ident_t* ident_make(allocator_t *alloc, token_t tok);
 APE_INTERNAL ident_t* ident_copy(const ident_t *ident);
 APE_INTERNAL void ident_destroy(ident_t *ident);
 
-APE_INTERNAL if_case_t *if_case_make(expression_t *test, code_block_t *consequence);
+APE_INTERNAL if_case_t *if_case_make(allocator_t *alloc, expression_t *test, code_block_t *consequence);
 APE_INTERNAL void if_case_destroy(if_case_t *cond);
 
 #endif /* ast_h */
@@ -823,6 +838,7 @@ typedef expression_t* (*prefix_parse_fn)(parser_t *p);
 typedef expression_t* (*infix_parse_fn)(parser_t *p, expression_t *expr);
 
 typedef struct parser {
+    allocator_t *alloc;
     const ape_config_t *config;
     lexer_t lexer;
     token_t cur_token;
@@ -835,7 +851,7 @@ typedef struct parser {
     int depth;
 } parser_t;
 
-APE_INTERNAL parser_t* parser_make(const ape_config_t *config, ptrarray(error_t) *errors);
+APE_INTERNAL parser_t* parser_make(allocator_t *alloc, const ape_config_t *config, ptrarray(error_t) *errors);
 APE_INTERNAL void parser_destroy(parser_t *parser);
 
 APE_INTERNAL ptrarray(statement_t)* parser_parse_all(parser_t *parser,  const char *input, compiled_file_t *file);
@@ -863,6 +879,7 @@ typedef enum symbol_type {
 } symbol_type_t;
 
 typedef struct symbol {
+    allocator_t *alloc;
     symbol_type_t type;
     char *name;
     int index;
@@ -870,26 +887,28 @@ typedef struct symbol {
 } symbol_t;
 
 typedef struct block_scope {
+    allocator_t *alloc;
     dict(symbol_t) *store;
     int offset;
     int num_definitions;
 } block_scope_t;
 
 typedef struct symbol_table {
+    allocator_t *alloc;
     struct symbol_table *outer;
     ptrarray(block_scope_t) *block_scopes;
     ptrarray(symbol_t) *free_symbols;
     int max_num_definitions;
 } symbol_table_t;
 
-APE_INTERNAL symbol_t *symbol_make(const char *name, symbol_type_t type, int index, bool assignable);
+APE_INTERNAL symbol_t *symbol_make(allocator_t *alloc, const char *name, symbol_type_t type, int index, bool assignable);
 APE_INTERNAL void symbol_destroy(symbol_t *symbol);
-APE_INTERNAL symbol_t* symbol_copy(const symbol_t *symbol);
+APE_INTERNAL symbol_t* symbol_copy(symbol_t *symbol);
 
-APE_INTERNAL symbol_table_t *symbol_table_make(symbol_table_t *outer);
+APE_INTERNAL symbol_table_t *symbol_table_make(allocator_t *alloc, symbol_table_t *outer);
 APE_INTERNAL void symbol_table_destroy(symbol_table_t *st);
 APE_INTERNAL symbol_table_t* symbol_table_copy(symbol_table_t *st);
-APE_INTERNAL void symbol_table_add_module_symbol(symbol_table_t *st, const symbol_t *symbol);
+APE_INTERNAL void symbol_table_add_module_symbol(symbol_table_t *st, symbol_t *symbol);
 APE_INTERNAL symbol_t *symbol_table_define(symbol_table_t *st, const char *name, bool assignable);
 APE_INTERNAL symbol_t *symbol_table_define_native_function(symbol_table_t *st, const char *name, int ix);
 APE_INTERNAL symbol_t *symbol_table_define_free(symbol_table_t *st, symbol_t *original);
@@ -1002,23 +1021,25 @@ APE_INTERNAL bool code_read_operands(opcode_definition_t *def, uint8_t *instr, u
 #endif
 
 typedef struct compilation_result {
+    allocator_t *alloc;
     uint8_t *bytecode;
     src_pos_t *src_positions;
     int count;
 } compilation_result_t;
 
 typedef struct compilation_scope {
+    allocator_t *alloc;
     struct compilation_scope *outer;
     array(uint8_t) *bytecode;
     array(src_pos_t) *src_positions;
     opcode_t last_opcode;
 } compilation_scope_t;
 
-APE_INTERNAL compilation_scope_t* compilation_scope_make(compilation_scope_t *outer);
+APE_INTERNAL compilation_scope_t* compilation_scope_make(allocator_t *alloc, compilation_scope_t *outer);
 APE_INTERNAL void compilation_scope_destroy(compilation_scope_t *scope);
 APE_INTERNAL compilation_result_t *compilation_scope_orphan_result(compilation_scope_t *scope);
 
-APE_INTERNAL compilation_result_t* compilation_result_make(uint8_t *bytecode, src_pos_t *src_positions, int count);
+APE_INTERNAL compilation_result_t* compilation_result_make(allocator_t *alloc, uint8_t *bytecode, src_pos_t *src_positions, int count);
 APE_INTERNAL void compilation_result_destroy(compilation_result_t* res);
 
 #endif /* compilation_scope_h */
@@ -1033,7 +1054,7 @@ APE_INTERNAL void compilation_result_destroy(compilation_result_t* res);
 #include "parser.h"
 #endif
 
-APE_INTERNAL expression_t* optimise_expression(const expression_t* expr);
+APE_INTERNAL expression_t* optimise_expression(expression_t* expr);
 
 #endif /* optimisation_h */
 //FILE_END
@@ -1055,11 +1076,13 @@ typedef struct gcmem gcmem_t;
 typedef struct symbol_table symbol_table_t;
 
 typedef struct module {
+    allocator_t *alloc;
     char *name;
     ptrarray(symbol_t) *symbols;
 } module_t;
 
 typedef struct compiled_file {
+    allocator_t *alloc;
     char *dir_path;
     char *path;
     ptrarray(char*) *lines;
@@ -1074,6 +1097,7 @@ typedef struct file_scope {
 } file_scope_t;
 
 typedef struct compiler {
+    allocator_t *alloc;
     const ape_config_t *config;
     gcmem_t *mem;
     compilation_scope_t *compilation_scope;
@@ -1087,7 +1111,7 @@ typedef struct compiler {
     ptrarray(compiled_file_t) *files;
 } compiler_t;
 
-APE_INTERNAL compiler_t *compiler_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors);
+APE_INTERNAL compiler_t *compiler_make(allocator_t *alloc, const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors);
 APE_INTERNAL void compiler_destroy(compiler_t *comp);
 APE_INTERNAL compilation_result_t* compiler_compile(compiler_t *comp, const char *code);
 APE_INTERNAL compilation_result_t* compiler_compile_file(compiler_t *comp, const char *path);
@@ -1235,8 +1259,8 @@ APE_INTERNAL gcmem_t*    object_get_mem(object_t obj);
 APE_INTERNAL bool        object_is_hashable(object_t obj);
 APE_INTERNAL void        object_to_string(object_t obj, strbuf_t *buf, bool quote_str);
 APE_INTERNAL const char* object_get_type_name(const object_type_t type);
-APE_INTERNAL char*       object_get_type_union_name(const object_type_t type);
-APE_INTERNAL char*       object_serialize(object_t object);
+APE_INTERNAL char*       object_get_type_union_name(allocator_t *alloc, const object_type_t type);
+APE_INTERNAL char*       object_serialize(allocator_t *alloc, object_t object);
 APE_INTERNAL object_t    object_deep_copy(gcmem_t *mem, object_t object);
 APE_INTERNAL object_t    object_copy(gcmem_t *mem, object_t obj);
 APE_INTERNAL double      object_compare(object_t a, object_t b);
@@ -1298,9 +1322,28 @@ APE_INTERNAL bool     object_map_has_key(object_t obj, object_t key);
 typedef struct object_data object_data_t;
 typedef struct env env_t;
 
-typedef struct gcmem gcmem_t;
+#define GCMEM_POOL_SIZE 2048
+#define GCMEM_POOLS_NUM 2
 
-APE_INTERNAL gcmem_t *gcmem_make(void);
+typedef struct object_data_pool {
+    object_data_t *data[GCMEM_POOL_SIZE];
+    int count;
+} object_data_pool_t;
+
+typedef struct gcmem {
+    allocator_t *alloc;
+    int allocations_since_sweep;
+
+    ptrarray(object_data_t) *objects;
+    ptrarray(object_data_t) *objects_back;
+
+    array(object_t) *objects_not_gced;
+
+    object_data_pool_t data_only_pool;
+    object_data_pool_t pools[GCMEM_POOLS_NUM];
+} gcmem_t;
+
+APE_INTERNAL gcmem_t *gcmem_make(allocator_t *alloc);
 APE_INTERNAL void gcmem_destroy(gcmem_t *mem);
 
 APE_INTERNAL object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type);
@@ -1354,10 +1397,11 @@ typedef struct traceback_item {
 } traceback_item_t;
 
 typedef struct traceback {
+    allocator_t *alloc;
     array(traceback_item_t)* items;
 } traceback_t;
 
-APE_INTERNAL traceback_t* traceback_make(void);
+APE_INTERNAL traceback_t* traceback_make(allocator_t *alloc);
 APE_INTERNAL void traceback_destroy(traceback_t *traceback);
 APE_INTERNAL void traceback_append(traceback_t *traceback, const char *function_name, src_pos_t pos);
 APE_INTERNAL void traceback_append_from_vm(traceback_t *traceback, vm_t *vm);
@@ -1424,6 +1468,7 @@ typedef struct ape_config ape_config_t;
 typedef struct compilation_result compilation_result_t;
 
 typedef struct vm {
+    allocator_t *alloc;
     const ape_config_t *config;
     gcmem_t *mem;
     object_t globals[VM_MAX_GLOBALS];
@@ -1443,7 +1488,7 @@ typedef struct vm {
     object_t operator_oveload_keys[OPCODE_MAX];
 } vm_t;
 
-APE_INTERNAL vm_t* vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors); // ape can be null (for internal testing purposes)
+APE_INTERNAL vm_t* vm_make(allocator_t *alloc, const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors); // config can be null (for internal testing purposes)
 APE_INTERNAL void  vm_destroy(vm_t *vm);
 
 APE_INTERNAL void vm_reset(vm_t *vm);
@@ -1473,6 +1518,7 @@ APE_INTERNAL void vm_set_runtime_error(vm_t *vm, error_t *error); // only allowe
 
 #ifndef APE_AMALGAMATED
 #include "common.h"
+#include "collections.h"
 #endif
 
 APE_INTERNAL const src_pos_t src_pos_invalid = { NULL, -1, -1 };
@@ -1486,13 +1532,13 @@ APE_INTERNAL src_pos_t src_pos_make(const compiled_file_t *file, int line, int c
     };
 }
 
-char *ape_stringf(const char *format, ...) {
+char *ape_stringf(allocator_t *alloc, const char *format, ...) {
     va_list args;
     va_start(args, format);
     int to_write = vsnprintf(NULL, 0, format, args);
     va_end(args);
     va_start(args, format);
-    char *res = (char*)ape_malloc(to_write + 1);
+    char *res = (char*)allocator_malloc(alloc, to_write + 1);
     int written = vsprintf(res, format, args);
     (void)written;
     APE_ASSERT(written == to_write);
@@ -1515,8 +1561,8 @@ void ape_log(const char *file, int line, const char *format, ...) {
     printf("%s", msg);
 }
 
-char* ape_strndup(const char *string, size_t n) {
-    char *output_string = (char*)ape_malloc(n + 1);
+char* ape_strndup(allocator_t *alloc, const char *string, size_t n) {
+    char *output_string = (char*)allocator_malloc(alloc, n + 1);
     if (!output_string) {
         return NULL;
     }
@@ -1525,11 +1571,11 @@ char* ape_strndup(const char *string, size_t n) {
     return output_string;
 }
 
-char* ape_strdup(const char *string) {
+char* ape_strdup(allocator_t *alloc, const char *string) {
     if (!string) {
         return NULL;
     }
-    return ape_strndup(string, strlen(string));
+    return ape_strndup(alloc, string, strlen(string));
 }
 
 uint64_t ape_double_to_uint64(double val) {
@@ -1623,25 +1669,13 @@ double ape_timer_get_elapsed_ms(const ape_timer_t *timer) {
 //-----------------------------------------------------------------------------
 // Collections
 //-----------------------------------------------------------------------------
-
-#undef malloc
-#undef free
-
-static char* collections_strndup(const char *string, size_t n);
-static char* collections_strdup(const char *string);
+static char* collections_strndup(allocator_t *alloc, const char *string, size_t n);
+static char* collections_strdup(allocator_t *alloc, const char *string);
 static unsigned long collections_hash(const void *ptr, size_t len); /* djb2 */
 static unsigned int upper_power_of_two(unsigned int v);
 
-static collections_malloc_fn collections_malloc = malloc;
-static collections_free_fn collections_free = free;
-
-void collections_set_memory_functions(collections_malloc_fn malloc_fn, collections_free_fn free_fn) {
-    collections_malloc = malloc_fn;
-    collections_free = free_fn;
-}
-
-static char* collections_strndup(const char *string, size_t n) {
-    char *output_string = (char*)collections_malloc(n + 1);
+static char* collections_strndup(allocator_t *alloc, const char *string, size_t n) {
+    char *output_string = (char*)allocator_malloc(alloc, n + 1);
     if (!output_string) {
         return NULL;
     }
@@ -1650,8 +1684,8 @@ static char* collections_strndup(const char *string, size_t n) {
     return output_string;
 }
 
-static char* collections_strdup(const char *string) {
-    return collections_strndup(string, strlen(string));
+static char* collections_strdup(allocator_t *alloc, const char *string) {
+    return collections_strndup(alloc, string, strlen(string));
 }
 
 static unsigned long collections_hash(const void *ptr, size_t len) { /* djb2 */
@@ -1676,6 +1710,33 @@ static unsigned int upper_power_of_two(unsigned int v) {
 }
 
 //-----------------------------------------------------------------------------
+// Allocator
+//-----------------------------------------------------------------------------
+
+allocator_t allocator_make(allocator_malloc_fn malloc_fn, allocator_free_fn free_fn, void *ctx) {
+    allocator_t alloc;
+    alloc.malloc = malloc_fn;
+    alloc.free = free_fn;
+    alloc.ctx = ctx;
+    return alloc;
+}
+
+void* allocator_malloc(allocator_t *allocator, size_t size) {
+    if (!allocator || !allocator->malloc) {
+        return malloc(size);
+    }
+    return allocator->malloc(allocator->ctx, size);
+}
+
+void  allocator_free(allocator_t *allocator, void *ptr) {
+    if (!allocator || !allocator->free) {
+        free(ptr);
+        return;
+    }
+    allocator->free(allocator->ctx, ptr);
+}
+
+//-----------------------------------------------------------------------------
 // Dictionary
 //-----------------------------------------------------------------------------
 
@@ -1683,6 +1744,7 @@ static unsigned int upper_power_of_two(unsigned int v) {
 #define DICT_INITIAL_SIZE 32
 
 typedef struct dict_ {
+    allocator_t *alloc;
     unsigned int *cells;
     unsigned long *hashes;
     char **keys;
@@ -1694,7 +1756,7 @@ typedef struct dict_ {
 } dict_t_;
 
 // Private declarations
-static bool dict_init(dict_t_ *dict, unsigned int initial_capacity);
+static bool dict_init(dict_t_ *dict, allocator_t *alloc, unsigned int initial_capacity);
 static void dict_deinit(dict_t_ *dict, bool free_keys);
 static unsigned int dict_get_cell_ix(const dict_t_ *dict,
                                      const char *key,
@@ -1705,14 +1767,14 @@ static bool dict_grow_and_rehash(dict_t_ *dict);
 static bool dict_set_internal(dict_t_ *dict, const char *ckey, char *mkey, void *value);
 
 // Public
-dict_t_* dict_make(void) {
-    dict_t_ *dict = collections_malloc(sizeof(dict_t_));
+dict_t_* dict_make(allocator_t *alloc) {
+    dict_t_ *dict = allocator_malloc(alloc, sizeof(dict_t_));
     if (dict == NULL) {
         return NULL;
     }
-    bool succeeded = dict_init(dict, DICT_INITIAL_SIZE);
-    if (succeeded == false) {
-        collections_free(dict);
+    bool ok = dict_init(dict, alloc, DICT_INITIAL_SIZE);
+    if (!ok) {
+        allocator_free(alloc, dict);
         return NULL;
     }
     return dict;
@@ -1722,8 +1784,9 @@ void dict_destroy(dict_t_ *dict) {
     if (dict == NULL) {
         return;
     }
+    allocator_t *alloc = dict->alloc;
     dict_deinit(dict, true);
-    collections_free(dict);
+    allocator_free(alloc, dict);
 }
 
 void dict_destroy_with_items_(dict_t_ *dict, dict_item_destroy_fn destroy_fn) {
@@ -1741,7 +1804,7 @@ void dict_destroy_with_items_(dict_t_ *dict, dict_item_destroy_fn destroy_fn) {
 }
 
 dict_t_* dict_copy_with_items_(dict_t_ *dict, dict_item_copy_fn copy_fn) {
-    dict_t_ *dict_copy = dict_make();
+    dict_t_ *dict_copy = dict_make(dict->alloc);
     for (int i = 0; i < dict_count(dict); i++) {
         const char *key = dict_get_key_at(dict, i);
         void *item = dict_get_value_at(dict, i);
@@ -1796,7 +1859,7 @@ bool dict_remove(dict_t_ *dict, const char *key) {
     }
 
     unsigned int item_ix = dict->cells[cell];
-    collections_free(dict->keys[item_ix]);
+    allocator_free(dict->alloc, dict->keys[item_ix]);
     unsigned int last_item_ix = dict->count - 1;
     if (item_ix < last_item_ix) {
         dict->keys[item_ix] = dict->keys[last_item_ix];
@@ -1828,7 +1891,7 @@ bool dict_remove(dict_t_ *dict, const char *key) {
 
 void dict_clear(dict_t_ *dict) {
     for (unsigned int i = 0; i < dict->count; i++) {
-        collections_free(dict->keys[i]);
+        allocator_free(dict->alloc, dict->keys[i]);
     }
     dict->count = 0;
     for (unsigned int i = 0; i < dict->cell_capacity; i++) {
@@ -1837,7 +1900,8 @@ void dict_clear(dict_t_ *dict) {
 }
 
 // Private definitions
-static bool dict_init(dict_t_ *dict, unsigned int initial_capacity) {
+static bool dict_init(dict_t_ *dict, allocator_t *alloc, unsigned int initial_capacity) {
+    dict->alloc = alloc;
     dict->cells = NULL;
     dict->keys = NULL;
     dict->values = NULL;
@@ -1848,11 +1912,11 @@ static bool dict_init(dict_t_ *dict, unsigned int initial_capacity) {
     dict->cell_capacity = initial_capacity;
     dict->item_capacity = (unsigned int)(initial_capacity * 0.7f);
 
-    dict->cells = collections_malloc(dict->cell_capacity * sizeof(*dict->cells));
-    dict->keys = collections_malloc(dict->item_capacity * sizeof(*dict->keys));
-    dict->values = collections_malloc(dict->item_capacity * sizeof(*dict->values));
-    dict->cell_ixs = collections_malloc(dict->item_capacity * sizeof(*dict->cell_ixs));
-    dict->hashes = collections_malloc(dict->item_capacity * sizeof(*dict->hashes));
+    dict->cells = allocator_malloc(alloc, dict->cell_capacity * sizeof(*dict->cells));
+    dict->keys = allocator_malloc(alloc, dict->item_capacity * sizeof(*dict->keys));
+    dict->values = allocator_malloc(alloc, dict->item_capacity * sizeof(*dict->values));
+    dict->cell_ixs = allocator_malloc(alloc, dict->item_capacity * sizeof(*dict->cell_ixs));
+    dict->hashes = allocator_malloc(alloc, dict->item_capacity * sizeof(*dict->hashes));
     if (dict->cells == NULL
         || dict->keys == NULL
         || dict->values == NULL
@@ -1865,29 +1929,29 @@ static bool dict_init(dict_t_ *dict, unsigned int initial_capacity) {
     }
     return true;
 error:
-    collections_free(dict->cells);
-    collections_free(dict->keys);
-    collections_free(dict->values);
-    collections_free(dict->cell_ixs);
-    collections_free(dict->hashes);
+    allocator_free(dict->alloc, dict->cells);
+    allocator_free(dict->alloc, dict->keys);
+    allocator_free(dict->alloc, dict->values);
+    allocator_free(dict->alloc, dict->cell_ixs);
+    allocator_free(dict->alloc, dict->hashes);
     return false;
 }
 
 static void dict_deinit(dict_t_ *dict, bool free_keys) {
     if (free_keys) {
         for (unsigned int i = 0; i < dict->count; i++) {
-            collections_free(dict->keys[i]);
+            allocator_free(dict->alloc, dict->keys[i]);
         }
     }
     dict->count = 0;
     dict->item_capacity = 0;
     dict->cell_capacity = 0;
 
-    collections_free(dict->cells);
-    collections_free(dict->keys);
-    collections_free(dict->values);
-    collections_free(dict->cell_ixs);
-    collections_free(dict->hashes);
+    allocator_free(dict->alloc, dict->cells);
+    allocator_free(dict->alloc, dict->keys);
+    allocator_free(dict->alloc, dict->values);
+    allocator_free(dict->alloc, dict->cell_ixs);
+    allocator_free(dict->alloc, dict->hashes);
 
     dict->cells = NULL;
     dict->keys = NULL;
@@ -1933,7 +1997,7 @@ static unsigned long hash_string(const char *str) { /* djb2 */
 
 static bool dict_grow_and_rehash(dict_t_ *dict) {
     dict_t_ new_dict;
-    bool succeeded = dict_init(&new_dict, dict->cell_capacity * 2);
+    bool succeeded = dict_init(&new_dict, dict->alloc, dict->cell_capacity * 2);
     if (succeeded == false) {
         return false;
     }
@@ -1968,7 +2032,7 @@ static bool dict_set_internal(dict_t_ *dict, const char *ckey, char *mkey, void 
         cell_ix = dict_get_cell_ix(dict, ckey, hash, &found);
     }
     dict->cells[cell_ix] = dict->count;
-    dict->keys[dict->count] = mkey != NULL ? mkey : collections_strdup(ckey);
+    dict->keys[dict->count] = mkey != NULL ? mkey : collections_strdup(dict->alloc, ckey);
     dict->values[dict->count] = value;
     dict->cell_ixs[dict->count] = cell_ix;
     dict->hashes[dict->count] = hash;
@@ -1981,6 +2045,7 @@ static bool dict_set_internal(dict_t_ *dict, const char *ckey, char *mkey, void 
 #define VALDICT_INVALID_IX UINT_MAX
 
 typedef struct valdict_ {
+    allocator_t *alloc;
     size_t key_size;
     size_t val_size;
     unsigned int *cells;
@@ -1996,7 +2061,7 @@ typedef struct valdict_ {
 } valdict_t_;
 
 // Private declarations
-static bool valdict_init(valdict_t_ *dict, size_t key_size, size_t val_size, unsigned int initial_capacity);
+static bool valdict_init(valdict_t_ *dict, allocator_t *alloc, size_t key_size, size_t val_size, unsigned int initial_capacity);
 static void valdict_deinit(valdict_t_ *dict);
 static unsigned int valdict_get_cell_ix(const valdict_t_ *dict,
                                         const void *key,
@@ -2008,20 +2073,20 @@ static bool valdict_keys_are_equal(const valdict_t_ *dict, const void *a, const 
 static unsigned long valdict_hash_key(const valdict_t_ *dict, const void *key);
 
 // Public
-valdict_t_* valdict_make_(size_t key_size, size_t val_size) {
-    return valdict_make_with_capacity(DICT_INITIAL_SIZE, key_size, val_size);
+valdict_t_* valdict_make_(allocator_t *alloc, size_t key_size, size_t val_size) {
+    return valdict_make_with_capacity(alloc, DICT_INITIAL_SIZE, key_size, val_size);
 }
 
-valdict_t_* valdict_make_with_capacity(unsigned int min_capacity, size_t key_size, size_t val_size) {
+valdict_t_* valdict_make_with_capacity(allocator_t *alloc, unsigned int min_capacity, size_t key_size, size_t val_size) {
     unsigned int capacity = upper_power_of_two(min_capacity * 2);
 
-    valdict_t_ *dict = collections_malloc(sizeof(valdict_t_));
+    valdict_t_ *dict = allocator_malloc(alloc, sizeof(valdict_t_));
     if (dict == NULL) {
         return NULL;
     }
-    bool succeeded = valdict_init(dict, key_size, val_size, capacity);
+    bool succeeded = valdict_init(dict, alloc, key_size, val_size, capacity);
     if (succeeded == false) {
-        collections_free(dict);
+        allocator_free(alloc, dict);
         return NULL;
     }
     return dict;
@@ -2031,8 +2096,9 @@ void valdict_destroy(valdict_t_ *dict) {
     if (dict == NULL) {
         return;
     }
+    allocator_t *alloc = dict->alloc;
     valdict_deinit(dict);
-    collections_free(dict);
+    allocator_free(alloc, dict);
 }
 
 void  valdict_set_hash_function(valdict_t_ *dict, collections_hash_fn hash_fn) {
@@ -2162,7 +2228,8 @@ void valdict_clear(valdict_t_ *dict) {
 }
 
 // Private definitions
-static bool valdict_init(valdict_t_ *dict, size_t key_size, size_t val_size, unsigned int initial_capacity) {
+static bool valdict_init(valdict_t_ *dict, allocator_t *alloc, size_t key_size, size_t val_size, unsigned int initial_capacity) {
+    dict->alloc = alloc;
     dict->key_size = key_size;
     dict->val_size = val_size;
     dict->cells = NULL;
@@ -2178,11 +2245,11 @@ static bool valdict_init(valdict_t_ *dict, size_t key_size, size_t val_size, uns
     dict->_keys_equals = NULL;
     dict->_hash_key = NULL;
 
-    dict->cells = collections_malloc(dict->cell_capacity * sizeof(*dict->cells));
-    dict->keys = collections_malloc(dict->item_capacity * key_size);
-    dict->values = collections_malloc(dict->item_capacity * val_size);
-    dict->cell_ixs = collections_malloc(dict->item_capacity * sizeof(*dict->cell_ixs));
-    dict->hashes = collections_malloc(dict->item_capacity * sizeof(*dict->hashes));
+    dict->cells = allocator_malloc(dict->alloc, dict->cell_capacity * sizeof(*dict->cells));
+    dict->keys = allocator_malloc(dict->alloc, dict->item_capacity * key_size);
+    dict->values = allocator_malloc(dict->alloc, dict->item_capacity * val_size);
+    dict->cell_ixs = allocator_malloc(dict->alloc, dict->item_capacity * sizeof(*dict->cell_ixs));
+    dict->hashes = allocator_malloc(dict->alloc, dict->item_capacity * sizeof(*dict->hashes));
     if (dict->cells == NULL
         || dict->keys == NULL
         || dict->values == NULL
@@ -2195,11 +2262,11 @@ static bool valdict_init(valdict_t_ *dict, size_t key_size, size_t val_size, uns
     }
     return true;
 error:
-    collections_free(dict->cells);
-    collections_free(dict->keys);
-    collections_free(dict->values);
-    collections_free(dict->cell_ixs);
-    collections_free(dict->hashes);
+    allocator_free(dict->alloc, dict->cells);
+    allocator_free(dict->alloc, dict->keys);
+    allocator_free(dict->alloc, dict->values);
+    allocator_free(dict->alloc, dict->cell_ixs);
+    allocator_free(dict->alloc, dict->hashes);
     return false;
 }
 
@@ -2210,11 +2277,11 @@ static void valdict_deinit(valdict_t_ *dict) {
     dict->item_capacity = 0;
     dict->cell_capacity = 0;
 
-    collections_free(dict->cells);
-    collections_free(dict->keys);
-    collections_free(dict->values);
-    collections_free(dict->cell_ixs);
-    collections_free(dict->hashes);
+    allocator_free(dict->alloc, dict->cells);
+    allocator_free(dict->alloc, dict->keys);
+    allocator_free(dict->alloc, dict->values);
+    allocator_free(dict->alloc, dict->cell_ixs);
+    allocator_free(dict->alloc, dict->hashes);
 
     dict->cells = NULL;
     dict->keys = NULL;
@@ -2253,7 +2320,7 @@ static unsigned int valdict_get_cell_ix(const valdict_t_ *dict,
 static bool valdict_grow_and_rehash(valdict_t_ *dict) {
     valdict_t_ new_dict;
     unsigned new_capacity = dict->cell_capacity == 0 ? DICT_INITIAL_SIZE : dict->cell_capacity * 2;
-    bool succeeded = valdict_init(&new_dict, dict->key_size, dict->val_size, new_capacity);
+    bool succeeded = valdict_init(&new_dict, dict->alloc, dict->key_size, dict->val_size, new_capacity);
     if (succeeded == false) {
         return false;
     }
@@ -2302,18 +2369,20 @@ static unsigned long valdict_hash_key(const valdict_t_ *dict, const void *key) {
 // Pointer dictionary
 //-----------------------------------------------------------------------------
 typedef struct ptrdict_ {
+    allocator_t *alloc;
     valdict_t_ vd;
 } ptrdict_t_;
 
 // Public
-ptrdict_t_* ptrdict_make(void) {
-    ptrdict_t_ *dict = collections_malloc(sizeof(ptrdict_t_));
+ptrdict_t_* ptrdict_make(allocator_t *alloc) {
+    ptrdict_t_ *dict = allocator_malloc(alloc, sizeof(ptrdict_t_));
     if (dict == NULL) {
         return NULL;
     }
-    bool succeeded = valdict_init(&dict->vd, sizeof(void*), sizeof(void*), DICT_INITIAL_SIZE);
+    dict->alloc = alloc;
+    bool succeeded = valdict_init(&dict->vd, alloc, sizeof(void*), sizeof(void*), DICT_INITIAL_SIZE);
     if (succeeded == false) {
-        collections_free(dict);
+        allocator_free(alloc, dict);
         return NULL;
     }
     return dict;
@@ -2324,7 +2393,7 @@ void ptrdict_destroy(ptrdict_t_ *dict) {
         return;
     }
     valdict_deinit(&dict->vd);
-    collections_free(dict);
+    allocator_free(dict->alloc, dict);
 }
 
 void  ptrdict_set_hash_function(ptrdict_t_ *dict, collections_hash_fn hash_fn) {
@@ -2380,6 +2449,7 @@ void ptrdict_clear(ptrdict_t_ *dict) {
 //-----------------------------------------------------------------------------
 
 typedef struct array_ {
+    allocator_t *alloc;
     unsigned char *data;
     unsigned char *data_allocated;
     unsigned int count;
@@ -2388,21 +2458,22 @@ typedef struct array_ {
     bool lock_capacity;
 } array_t_;
 
-static bool array_init_with_capacity(array_t_ *arr, unsigned int capacity, size_t element_size);
+static bool array_init_with_capacity(array_t_ *arr, allocator_t *alloc, unsigned int capacity, size_t element_size);
 static void array_deinit(array_t_ *arr);
 
-array_t_* array_make_(size_t element_size) {
-    return array_make_with_capacity(32, element_size);
+array_t_* array_make_(allocator_t *alloc, size_t element_size) {
+    return array_make_with_capacity(alloc, 32, element_size);
 }
 
-array_t_* array_make_with_capacity(unsigned int capacity, size_t element_size) {
-    array_t_ *arr = collections_malloc(sizeof(array_t_));
+array_t_* array_make_with_capacity(allocator_t *alloc, unsigned int capacity, size_t element_size) {
+    array_t_ *arr = allocator_malloc(alloc, sizeof(array_t_));
     if (arr == NULL) {
         return NULL;
     }
-    bool succeeded = array_init_with_capacity(arr, capacity, element_size);
+
+    bool succeeded = array_init_with_capacity(arr, alloc, capacity, element_size);
     if (succeeded == false) {
-        collections_free(arr);
+        allocator_free(alloc, arr);
         return NULL;
     }
     return arr;
@@ -2412,8 +2483,9 @@ void array_destroy(array_t_ *arr) {
     if (arr == NULL) {
         return;
     }
+    allocator_t *alloc = arr->alloc;
     array_deinit(arr);
-    collections_free(arr);
+    allocator_free(alloc, arr);
 }
 
 void array_destroy_with_items_(array_t_ *arr, array_item_deinit_fn deinit_fn) {
@@ -2425,18 +2497,19 @@ void array_destroy_with_items_(array_t_ *arr, array_item_deinit_fn deinit_fn) {
 }
 
 array_t_* array_copy(const array_t_ *arr) {
-    array_t_ *copy = collections_malloc(sizeof(array_t_));
+    array_t_ *copy = allocator_malloc(arr->alloc, sizeof(array_t_));
     if (!copy) {
         return NULL;
     }
+    copy->alloc = arr->alloc;
     copy->capacity = arr->capacity;
     copy->count = arr->count;
     copy->element_size = arr->element_size;
     copy->lock_capacity = arr->lock_capacity;
-    copy->data = collections_malloc(arr->capacity * arr->element_size);
+    copy->data = allocator_malloc(arr->alloc, arr->capacity * arr->element_size);
     memcpy(copy->data, arr->data, arr->capacity * arr->element_size);
     if (!copy->data) {
-        collections_free(copy);
+        allocator_free(arr->alloc, copy);
         return NULL;
     }
     return copy;
@@ -2450,12 +2523,12 @@ bool array_add(array_t_ *arr, const void *value) {
             return false;
         }
         unsigned int new_capacity = arr->capacity > 0 ? arr->capacity * 2 : 1;
-        unsigned char *new_data = collections_malloc(new_capacity * arr->element_size);
+        unsigned char *new_data = allocator_malloc(arr->alloc, new_capacity * arr->element_size);
         if (new_data == NULL) {
             return false;
         }
         memcpy(new_data, arr->data, arr->count * arr->element_size);
-        collections_free(arr->data_allocated);
+        allocator_free(arr->alloc, arr->data_allocated);
         arr->data_allocated = new_data;
         arr->data = arr->data_allocated;
         arr->capacity = new_capacity;
@@ -2643,7 +2716,7 @@ const void* array_const_data(const array_t_ *arr) {
 }
 
 bool array_orphan_data(array_t_ *arr) {
-    return array_init_with_capacity(arr, 0, arr->element_size);
+    return array_init_with_capacity(arr, arr->alloc, 0, arr->element_size);
 }
 
 void array_reverse(array_t_ *arr) {
@@ -2651,7 +2724,7 @@ void array_reverse(array_t_ *arr) {
     if (count < 2) {
         return;
     }
-    void *temp = collections_malloc(arr->element_size);
+    void *temp = allocator_malloc(arr->alloc, arr->element_size);
     for (int a_ix = 0; a_ix < (count / 2); a_ix++) {
         int b_ix = count - a_ix - 1;
         void *a = array_get(arr, a_ix);
@@ -2660,12 +2733,13 @@ void array_reverse(array_t_ *arr) {
         array_set(arr, a_ix, b);
         array_set(arr, b_ix, temp);
     }
-    collections_free(temp);
+    allocator_free(arr->alloc, temp);
 }
 
-static bool array_init_with_capacity(array_t_ *arr, unsigned int capacity, size_t element_size) {
+static bool array_init_with_capacity(array_t_ *arr, allocator_t *alloc, unsigned int capacity, size_t element_size) {
+    arr->alloc = alloc;
     if (capacity > 0) {
-        arr->data_allocated = collections_malloc(capacity * element_size);
+        arr->data_allocated = allocator_malloc(arr->alloc, capacity * element_size);
         arr->data = arr->data_allocated;
         if (arr->data_allocated == NULL) {
             return false;
@@ -2682,7 +2756,7 @@ static bool array_init_with_capacity(array_t_ *arr, unsigned int capacity, size_
 }
 
 static void array_deinit(array_t_ *arr) {
-    collections_free(arr->data_allocated);
+    allocator_free(arr->alloc, arr->data_allocated);
 }
 
 //-----------------------------------------------------------------------------
@@ -2690,21 +2764,23 @@ static void array_deinit(array_t_ *arr) {
 //-----------------------------------------------------------------------------
 
 typedef struct ptrarray_ {
+    allocator_t *alloc;
     array_t_ arr;
 } ptrarray_t_;
 
-ptrarray_t_* ptrarray_make(void) {
-    return ptrarray_make_with_capacity(0);
+ptrarray_t_* ptrarray_make(allocator_t *alloc) {
+    return ptrarray_make_with_capacity(alloc, 0);
 }
 
-ptrarray_t_* ptrarray_make_with_capacity(unsigned int capacity) {
-    ptrarray_t_ *ptrarr = collections_malloc(sizeof(ptrarray_t_));
+ptrarray_t_* ptrarray_make_with_capacity(allocator_t *alloc, unsigned int capacity) {
+    ptrarray_t_ *ptrarr = allocator_malloc(alloc, sizeof(ptrarray_t_));
     if (ptrarr == NULL) {
         return NULL;
     }
-    bool succeeded = array_init_with_capacity(&ptrarr->arr, capacity, sizeof(void*));
+    ptrarr->alloc = alloc;
+    bool succeeded = array_init_with_capacity(&ptrarr->arr, alloc, capacity, sizeof(void*));
     if (succeeded == false) {
-        collections_free(ptrarr);
+        allocator_free(alloc, ptrarr);
         return NULL;
     }
     return ptrarr;
@@ -2715,7 +2791,7 @@ void ptrarray_destroy(ptrarray_t_ *arr) {
         return;
     }
     array_deinit(&arr->arr);
-    collections_free(arr);
+    allocator_free(arr->alloc, arr);
 }
 
 void ptrarray_destroy_with_items_(ptrarray_t_ *arr, ptrarray_item_destroy_fn destroy_fn){
@@ -2731,7 +2807,7 @@ void ptrarray_destroy_with_items_(ptrarray_t_ *arr, ptrarray_item_destroy_fn des
 }
 
 ptrarray_t_* ptrarray_copy(ptrarray_t_ *arr) {
-    ptrarray_t_ *arr_copy = ptrarray_make_with_capacity(arr->arr.capacity);
+    ptrarray_t_ *arr_copy = ptrarray_make_with_capacity(arr->alloc, arr->arr.capacity);
     for (int i = 0; i < ptrarray_count(arr); i++) {
         void *item = ptrarray_get(arr, i);
         ptrarray_add(arr_copy, item);
@@ -2740,7 +2816,7 @@ ptrarray_t_* ptrarray_copy(ptrarray_t_ *arr) {
 }
 
 ptrarray_t_* ptrarray_copy_with_items_(ptrarray_t_ *arr, ptrarray_item_copy_fn copy_fn) {
-    ptrarray_t_ *arr_copy = ptrarray_make_with_capacity(arr->arr.capacity);
+    ptrarray_t_ *arr_copy = ptrarray_make_with_capacity(arr->alloc, arr->arr.capacity);
     for (int i = 0; i < ptrarray_count(arr); i++) {
         void *item = ptrarray_get(arr, i);
         void *item_copy = copy_fn(item);
@@ -2857,6 +2933,7 @@ void ptrarray_reverse(ptrarray_t_ *arr) {
 //-----------------------------------------------------------------------------
 
 typedef struct strbuf {
+    allocator_t *alloc;
     char *data;
     size_t capacity;
     size_t len;
@@ -2864,20 +2941,20 @@ typedef struct strbuf {
 
 static bool strbuf_grow(strbuf_t *buf, size_t new_capacity);
 
-strbuf_t* strbuf_make(void) {
-    strbuf_t *res = strbuf_make_with_capacity(1);
-    return res;
+strbuf_t* strbuf_make(allocator_t *alloc) {
+    return strbuf_make_with_capacity(alloc, 1);
 }
 
-strbuf_t* strbuf_make_with_capacity(unsigned int capacity) {
-    strbuf_t *buf = collections_malloc(sizeof(strbuf_t));
+strbuf_t* strbuf_make_with_capacity(allocator_t *alloc, unsigned int capacity) {
+    strbuf_t *buf = allocator_malloc(alloc, sizeof(strbuf_t));
     if (buf == NULL) {
         return NULL;
     }
     memset(buf, 0, sizeof(strbuf_t));
-    buf->data = collections_malloc(capacity);
+    buf->alloc = alloc;
+    buf->data = allocator_malloc(alloc, capacity);
     if (buf->data == NULL) {
-        collections_free(buf);
+        allocator_free(alloc, buf);
         return NULL;
     }
     buf->capacity = capacity;
@@ -2890,8 +2967,8 @@ void strbuf_destroy(strbuf_t *buf) {
     if (buf == NULL) {
         return;
     }
-    collections_free(buf->data);
-    collections_free(buf);
+    allocator_free(buf->alloc, buf->data);
+    allocator_free(buf->alloc, buf);
 }
 
 void strbuf_clear(strbuf_t *buf) {
@@ -2960,13 +3037,13 @@ char * strbuf_get_string_and_destroy(strbuf_t *buf) {
 }
 
 static bool strbuf_grow(strbuf_t *buf, size_t new_capacity) {
-    char *new_data = collections_malloc(new_capacity);
+    char *new_data = allocator_malloc(buf->alloc, new_capacity);
     if (new_data == NULL) {
         return false;
     }
     memcpy(new_data, buf->data, buf->len);
     new_data[buf->len] = '\0';
-    collections_free(buf->data);
+    allocator_free(buf->alloc, buf->data);
     buf->data = new_data;
     buf->capacity = new_capacity;
     return true;
@@ -2976,8 +3053,8 @@ static bool strbuf_grow(strbuf_t *buf, size_t new_capacity) {
 // Utils
 //-----------------------------------------------------------------------------
 
-ptrarray(char)* kg_split_string(const char *str, const char *delimiter) {
-    ptrarray(char)* res = ptrarray_make();
+ptrarray(char)* kg_split_string(allocator_t *alloc, const char *str, const char *delimiter) {
+    ptrarray(char)* res = ptrarray_make(alloc);
     if (!str) {
         return res;
     }
@@ -2985,18 +3062,18 @@ ptrarray(char)* kg_split_string(const char *str, const char *delimiter) {
     const char *line_end = strstr(line_start, delimiter);
     while (line_end != NULL) {
         long len = line_end - line_start;
-        char *line = collections_strndup(line_start, len);
+        char *line = collections_strndup(alloc, line_start, len);
         ptrarray_add(res, line);
         line_start = line_end + 1;
         line_end = strstr(line_start, delimiter);
     }
-    char *rest = collections_strdup(line_start);
+    char *rest = collections_strdup(alloc, line_start);
     ptrarray_add(res, rest);
     return res;
 }
 
-char* kg_join(ptrarray(char) *items, const char *with) {
-    strbuf_t *res = strbuf_make();
+char* kg_join(allocator_t *alloc, ptrarray(char) *items, const char *with) {
+    strbuf_t *res = strbuf_make(alloc);
     for (int i = 0; i < ptrarray_count(items); i++) {
         char *item = ptrarray_get(items, i);
         strbuf_append(res, item);
@@ -3007,25 +3084,25 @@ char* kg_join(ptrarray(char) *items, const char *with) {
     return strbuf_get_string_and_destroy(res);
 }
 
-char* kg_canonicalise_path(const char *path) {
+char* kg_canonicalise_path(allocator_t *alloc, const char *path) {
     if (!strchr(path, '/') || (!strstr(path, "/../") && !strstr(path, "./"))) {
-        return collections_strdup(path);
+        return collections_strdup(alloc, path);
     }
 
-    ptrarray(char) *split = kg_split_string(path, "/");
+    ptrarray(char) *split = kg_split_string(alloc, path, "/");
 
     for (int i = 0; i < ptrarray_count(split) - 1; i++) {
         char *item = ptrarray_get(split, i);
         char *next_item = ptrarray_get(split, i + 1);
         if (kg_streq(item, ".")) {
-            collections_free(item);
+            allocator_free(alloc, item);
             ptrarray_remove_at(split, i);
             i = -1;
             continue;
         }
         if (kg_streq(next_item, "..")) {
-            collections_free(item);
-            collections_free(next_item);
+            allocator_free(alloc, item);
+            allocator_free(alloc, next_item);
             ptrarray_remove_at(split, i);
             ptrarray_remove_at(split, i);
             i = -1;
@@ -3033,8 +3110,12 @@ char* kg_canonicalise_path(const char *path) {
         }
     }
 
-    char *joined = kg_join(split, "/");
-    ptrarray_destroy_with_items(split, collections_free);
+    char *joined = kg_join(alloc, split, "/");
+    for (int i = 0; i < ptrarray_count(split); i++) {
+        void *item = ptrarray_get(split, i);
+        allocator_free(alloc, item);
+    }
+    ptrarray_destroy(split);
     return joined;
 }
 
@@ -3056,9 +3137,10 @@ bool kg_streq(const char *a, const char *b) {
 #include "traceback.h"
 #endif
 
-error_t* error_make_no_copy(error_type_t type, src_pos_t pos, char *message) {
-    error_t *err = ape_malloc(sizeof(error_t));
+error_t* error_make_no_copy(allocator_t *alloc, error_type_t type, src_pos_t pos, char *message) {
+    error_t *err = allocator_malloc(alloc, sizeof(error_t));
     memset(err, 0, sizeof(error_t));
+    err->alloc = alloc;
     err->type = type;
     err->message = message;
     err->pos = pos;
@@ -3066,22 +3148,30 @@ error_t* error_make_no_copy(error_type_t type, src_pos_t pos, char *message) {
     return err;
 }
 
-error_t* error_make(error_type_t type, src_pos_t pos, const char *message) {
-    return error_make_no_copy(type, pos, ape_strdup(message));
+error_t* error_make(allocator_t *alloc, error_type_t type, src_pos_t pos, const char *message) {
+    return error_make_no_copy(alloc, type, pos, ape_strdup(alloc, message));
 }
 
-error_t* error_makef(error_type_t type, src_pos_t pos, const char *format, ...) {
+error_t error_make_allocation_error() {
+    error_t err;
+    memset(&err, 0, sizeof(error_t));
+    err.type = ERROR_ALLOCATION;
+    err.message = "Allocation failed";
+    return err;
+}
+
+error_t* error_makef(allocator_t *alloc, error_type_t type, src_pos_t pos, const char *format, ...) {
     va_list args;
     va_start(args, format);
     int to_write = vsnprintf(NULL, 0, format, args);
     va_end(args);
     va_start(args, format);
-    char *res = (char*)ape_malloc(to_write + 1);
+    char *res = (char*)allocator_malloc(alloc, to_write + 1);
     int written = vsprintf(res, format, args);
     (void)written;
     APE_ASSERT(to_write == written);
     va_end(args);
-    return error_make_no_copy(type, pos, res);
+    return error_make_no_copy(alloc, type, pos, res);
 }
 
 void error_destroy(error_t *error) {
@@ -3089,8 +3179,8 @@ void error_destroy(error_t *error) {
         return;
     }
     traceback_destroy(error->traceback);
-    ape_free(error->message);
-    ape_free(error);
+    allocator_free(error->alloc, error->message);
+    allocator_free(error->alloc, error);
 }
 
 const char *error_type_to_string(error_type_t type) {
@@ -3098,7 +3188,8 @@ const char *error_type_to_string(error_type_t type) {
         case ERROR_PARSING:     return "PARSING";
         case ERROR_COMPILATION: return "COMPILATION";
         case ERROR_RUNTIME:     return "RUNTIME";
-        case ERROR_OUT_OF_TIME: return "OUT_OF_TIME";
+        case ERROR_TIMEOUT:     return "TIMEOUT";
+        case ERROR_ALLOCATION:  return "ALLOCATION";
         case ERROR_USER:        return "USER";
         default:                return "INVALID";
     }
@@ -3182,8 +3273,8 @@ void token_make(token_t *tok, token_type_t type, const char *literal, int len) {
     tok->len = len;
 }
 
-char* token_duplicate_literal(const token_t *tok) {
-    return ape_strndup(tok->literal, tok->len);
+char* token_duplicate_literal(allocator_t *alloc, const token_t *tok) {
+    return ape_strndup(alloc, tok->literal, tok->len);
 }
 
 const char* token_type_to_string(token_type_t type) {
@@ -3212,7 +3303,8 @@ static token_type_t lookup_identifier(const char *ident, int len);
 static void skip_whitespace(lexer_t *lex);
 static void add_line(lexer_t *lex, int offset);
 
-bool lexer_init(lexer_t *lex, const char *input, compiled_file_t *file) {
+bool lexer_init(lexer_t *lex, allocator_t *alloc, const char *input, compiled_file_t *file) {
+    lex->alloc = alloc;
     lex->input = input;
     lex->input_len = (int)strlen(input);
     lex->position = 0;
@@ -3574,10 +3666,10 @@ static void add_line(lexer_t *lex, int offset) {
     const char *new_line_ptr = strchr(line_start, '\n');
     char *line = NULL;
     if (!new_line_ptr) {
-        line = ape_strdup(line_start);
+        line = ape_strdup(lex->alloc, line_start);
     } else {
         size_t line_len = new_line_ptr - line_start;
-        line = ape_strndup(line_start, line_len);
+        line = ape_strndup(lex->alloc, line_start, line_len);
     }
     ptrarray_add(lex->file->lines, line);
 }
@@ -3591,97 +3683,97 @@ static void add_line(lexer_t *lex, int offset) {
 #include "common.h"
 #endif
 
-static expression_t* expression_make(expression_type_t type);
-static statement_t* statement_make(statement_type_t type);
+static expression_t* expression_make(allocator_t *alloc, expression_type_t type);
+static statement_t* statement_make(allocator_t *alloc, statement_type_t type);
 
-expression_t* expression_make_ident(ident_t *ident) {
-    expression_t *res = expression_make(EXPRESSION_IDENT);
+expression_t* expression_make_ident(allocator_t *alloc, ident_t *ident) {
+    expression_t *res = expression_make(alloc, EXPRESSION_IDENT);
     res->ident = ident;
     return res;
 }
 
-expression_t* expression_make_number_literal(double val) {
-    expression_t *res = expression_make(EXPRESSION_NUMBER_LITERAL);
+expression_t* expression_make_number_literal(allocator_t *alloc, double val) {
+    expression_t *res = expression_make(alloc, EXPRESSION_NUMBER_LITERAL);
     res->number_literal = val;
     return res;
 }
 
-expression_t* expression_make_bool_literal(bool val) {
-    expression_t *res = expression_make(EXPRESSION_BOOL_LITERAL);
+expression_t* expression_make_bool_literal(allocator_t *alloc, bool val) {
+    expression_t *res = expression_make(alloc, EXPRESSION_BOOL_LITERAL);
     res->bool_literal = val;
     return res;
 }
 
-expression_t* expression_make_string_literal(char *value) {
-    expression_t *res = expression_make(EXPRESSION_STRING_LITERAL);
+expression_t* expression_make_string_literal(allocator_t *alloc, char *value) {
+    expression_t *res = expression_make(alloc, EXPRESSION_STRING_LITERAL);
     res->string_literal = value;
     return res;
 }
 
-expression_t* expression_make_null_literal() {
-    expression_t *res = expression_make(EXPRESSION_NULL_LITERAL);
+expression_t* expression_make_null_literal(allocator_t *alloc) {
+    expression_t *res = expression_make(alloc, EXPRESSION_NULL_LITERAL);
     return res;
 }
 
-expression_t* expression_make_array_literal(ptrarray(expression_t) *values) {
-    expression_t *res = expression_make(EXPRESSION_ARRAY_LITERAL);
+expression_t* expression_make_array_literal(allocator_t *alloc, ptrarray(expression_t) *values) {
+    expression_t *res = expression_make(alloc, EXPRESSION_ARRAY_LITERAL);
     res->array = values;
     return res;
 }
 
-expression_t* expression_make_map_literal(ptrarray(expression_t) *keys, ptrarray(expression_t) *values) {
-    expression_t *res = expression_make(EXPRESSION_MAP_LITERAL);
+expression_t* expression_make_map_literal(allocator_t *alloc, ptrarray(expression_t) *keys, ptrarray(expression_t) *values) {
+    expression_t *res = expression_make(alloc, EXPRESSION_MAP_LITERAL);
     res->map.keys = keys;
     res->map.values = values;
     return res;
 }
 
-expression_t* expression_make_prefix(operator_t op, expression_t *right) {
-    expression_t *res = expression_make(EXPRESSION_PREFIX);
+expression_t* expression_make_prefix(allocator_t *alloc, operator_t op, expression_t *right) {
+    expression_t *res = expression_make(alloc, EXPRESSION_PREFIX);
     res->prefix.op = op;
     res->prefix.right = right;
     return res;
 }
 
-expression_t* expression_make_infix(operator_t op, expression_t *left, expression_t *right) {
-    expression_t *res = expression_make(EXPRESSION_INFIX);
+expression_t* expression_make_infix(allocator_t *alloc, operator_t op, expression_t *left, expression_t *right) {
+    expression_t *res = expression_make(alloc, EXPRESSION_INFIX);
     res->infix.op = op;
     res->infix.left = left;
     res->infix.right = right;
     return res;
 }
 
-expression_t* expression_make_fn_literal(ptrarray(ident_t) *params, code_block_t *body) {
-    expression_t *res = expression_make(EXPRESSION_FUNCTION_LITERAL);
+expression_t* expression_make_fn_literal(allocator_t *alloc, ptrarray(ident_t) *params, code_block_t *body) {
+    expression_t *res = expression_make(alloc, EXPRESSION_FUNCTION_LITERAL);
     res->fn_literal.name = NULL;
     res->fn_literal.params = params;
     res->fn_literal.body = body;
     return res;
 }
 
-expression_t* expression_make_call(expression_t *function, ptrarray(expression_t) *args) {
-    expression_t *res = expression_make(EXPRESSION_CALL);
+expression_t* expression_make_call(allocator_t *alloc, expression_t *function, ptrarray(expression_t) *args) {
+    expression_t *res = expression_make(alloc, EXPRESSION_CALL);
     res->call_expr.function = function;
     res->call_expr.args = args;
     return res;
 }
 
-expression_t* expression_make_index(expression_t *left, expression_t *index) {
-    expression_t *res = expression_make(EXPRESSION_INDEX);
+expression_t* expression_make_index(allocator_t *alloc, expression_t *left, expression_t *index) {
+    expression_t *res = expression_make(alloc, EXPRESSION_INDEX);
     res->index_expr.left = left;
     res->index_expr.index = index;
     return res;
 }
 
-expression_t* expression_make_assign(expression_t *dest, expression_t *source) {
-    expression_t *res = expression_make(EXPRESSION_ASSIGN);
+expression_t* expression_make_assign(allocator_t *alloc, expression_t *dest, expression_t *source) {
+    expression_t *res = expression_make(alloc, EXPRESSION_ASSIGN);
     res->assign.dest = dest;
     res->assign.source = source;
     return res;
 }
 
-expression_t* expression_make_logical(operator_t op, expression_t *left, expression_t *right) {
-    expression_t *res = expression_make(EXPRESSION_LOGICAL);
+expression_t* expression_make_logical(allocator_t *alloc, operator_t op, expression_t *left, expression_t *right) {
+    expression_t *res = expression_make(alloc, EXPRESSION_LOGICAL);
     res->logical.op = op;
     res->logical.left = left;
     res->logical.right = right;
@@ -3707,7 +3799,7 @@ void expression_destroy(expression_t *expr) {
             break;
         }
         case EXPRESSION_STRING_LITERAL: {
-            ape_free(expr->string_literal);
+            allocator_free(expr->alloc, expr->string_literal);
             break;
         }
         case EXPRESSION_NULL_LITERAL: {
@@ -3732,7 +3824,10 @@ void expression_destroy(expression_t *expr) {
             break;
         }
         case EXPRESSION_FUNCTION_LITERAL: {
-            fn_literal_deinit(&expr->fn_literal);
+            fn_literal_t *fn = &expr->fn_literal;
+            allocator_free(expr->alloc, fn->name);
+            ptrarray_destroy_with_items(fn->params, ident_destroy);
+            code_block_destroy(fn->body);
             break;
         }
         case EXPRESSION_CALL: {
@@ -3756,10 +3851,11 @@ void expression_destroy(expression_t *expr) {
             break;
         }
     }
-    ape_free(expr);
+    allocator_free(expr->alloc, expr);
+
 }
 
-expression_t* expression_copy(const expression_t *expr) {
+expression_t* expression_copy(expression_t *expr) {
     if (!expr) {
         return NULL;
     }
@@ -3771,81 +3867,81 @@ expression_t* expression_copy(const expression_t *expr) {
         }
         case EXPRESSION_IDENT: {
             ident_t *ident = ident_copy(expr->ident);
-            res = expression_make_ident(ident);
+            res = expression_make_ident(expr->alloc, ident);
             break;
         }
         case EXPRESSION_NUMBER_LITERAL: {
-            res = expression_make_number_literal(expr->number_literal);
+            res = expression_make_number_literal(expr->alloc, expr->number_literal);
             break;
         }
         case EXPRESSION_BOOL_LITERAL: {
-            res = expression_make_bool_literal(expr->bool_literal);
+            res = expression_make_bool_literal(expr->alloc, expr->bool_literal);
             break;
         }
         case EXPRESSION_STRING_LITERAL: {
-            res = expression_make_string_literal(ape_strdup(expr->string_literal));
+            res = expression_make_string_literal(expr->alloc, ape_strdup(expr->alloc, expr->string_literal));
             break;
         }
         case EXPRESSION_NULL_LITERAL: {
-            res = expression_make_null_literal();
+            res = expression_make_null_literal(expr->alloc);
             break;
         }
         case EXPRESSION_ARRAY_LITERAL: {
             ptrarray(expression_t) *values_copy = ptrarray_copy_with_items(expr->array, expression_copy);
-            res = expression_make_array_literal(values_copy);
+            res = expression_make_array_literal(expr->alloc, values_copy);
             break;
         }
         case EXPRESSION_MAP_LITERAL: {
             ptrarray(expression_t) *keys_copy = ptrarray_copy_with_items(expr->map.keys, expression_copy);
             ptrarray(expression_t) *values_copy = ptrarray_copy_with_items(expr->map.values, expression_copy);
-            res = expression_make_map_literal(keys_copy, values_copy);
+            res = expression_make_map_literal(expr->alloc, keys_copy, values_copy);
             break;
         }
         case EXPRESSION_PREFIX: {
             expression_t *right_copy = expression_copy(expr->prefix.right);
-            res = expression_make_prefix(expr->prefix.op, right_copy);
+            res = expression_make_prefix(expr->alloc, expr->prefix.op, right_copy);
             break;
         }
         case EXPRESSION_INFIX: {
             expression_t *left_copy = expression_copy(expr->infix.left);
             expression_t *right_copy = expression_copy(expr->infix.right);
-            res = expression_make_infix(expr->infix.op, left_copy, right_copy);
+            res = expression_make_infix(expr->alloc, expr->infix.op, left_copy, right_copy);
             break;
         }
         case EXPRESSION_FUNCTION_LITERAL: {
-            ptrarray(ident_t) *params_copy = ptrarray_make();
+            ptrarray(ident_t) *params_copy = ptrarray_make(expr->alloc);
             for (int i = 0; i < ptrarray_count(expr->fn_literal.params); i++) {
                 ident_t *param = ptrarray_get(expr->fn_literal.params, i);
                 ident_t *copy = ident_copy(param);
                 ptrarray_add(params_copy, copy);
             }
             code_block_t *body_copy = code_block_copy(expr->fn_literal.body);
-            res = expression_make_fn_literal(params_copy, body_copy);
-            res->fn_literal.name = ape_strdup(expr->fn_literal.name);
+            res = expression_make_fn_literal(expr->alloc, params_copy, body_copy);
+            res->fn_literal.name = ape_strdup(expr->alloc, expr->fn_literal.name);
             break;
         }
         case EXPRESSION_CALL: {
             expression_t *function_copy = expression_copy(expr->call_expr.function);
             ptrarray(expression_t) *args_copy = ptrarray_copy_with_items(expr->call_expr.args, expression_copy);
-            res = expression_make_call(function_copy, args_copy);
+            res = expression_make_call(expr->alloc, function_copy, args_copy);
             break;
         }
         case EXPRESSION_INDEX: {
             expression_t *left_copy = expression_copy(expr->index_expr.left);
             expression_t *index_copy = expression_copy(expr->index_expr.index);
-            res = expression_make_index(left_copy, index_copy);
+            res = expression_make_index(expr->alloc, left_copy, index_copy);
             break;
         }
         case EXPRESSION_ASSIGN: {
             expression_t *dest_copy = expression_copy(expr->assign.dest);
             expression_t *source_copy = expression_copy(expr->assign.source);
-            res = expression_make_assign(dest_copy, source_copy);
+            res = expression_make_assign(expr->alloc, dest_copy, source_copy);
             break;
         }
         case EXPRESSION_LOGICAL: {
             expression_t *left_copy = expression_copy(expr->logical.left);
             expression_t *right_copy = expression_copy(expr->logical.right);
-            res = expression_make_logical(expr->logical.op, left_copy, right_copy);
+            res = expression_make_logical(expr->alloc, expr->logical.op, left_copy, right_copy);
             break;
         }
     }
@@ -3853,55 +3949,55 @@ expression_t* expression_copy(const expression_t *expr) {
     return res;
 }
 
-statement_t* statement_make_define(ident_t *name, expression_t *value, bool assignable) {
-    statement_t *res = statement_make(STATEMENT_DEFINE);
+statement_t* statement_make_define(allocator_t *alloc, ident_t *name, expression_t *value, bool assignable) {
+    statement_t *res = statement_make(alloc, STATEMENT_DEFINE);
     res->define.name = name;
     res->define.value = value;
     res->define.assignable = assignable;
     return res;
 }
 
-statement_t* statement_make_if(ptrarray(if_case_t) *cases, code_block_t *alternative) {
-    statement_t *res = statement_make(STATEMENT_IF);
+statement_t* statement_make_if(allocator_t *alloc, ptrarray(if_case_t) *cases, code_block_t *alternative) {
+    statement_t *res = statement_make(alloc, STATEMENT_IF);
     res->if_statement.cases = cases;
     res->if_statement.alternative = alternative;
     return res;
 }
 
-statement_t* statement_make_return(expression_t *value) {
-    statement_t *res = statement_make(STATEMENT_RETURN_VALUE);
+statement_t* statement_make_return(allocator_t *alloc, expression_t *value) {
+    statement_t *res = statement_make(alloc, STATEMENT_RETURN_VALUE);
     res->return_value = value;
     return res;
 }
 
-statement_t* statement_make_expression(expression_t *value) {
-    statement_t *res = statement_make(STATEMENT_EXPRESSION);
+statement_t* statement_make_expression(allocator_t *alloc, expression_t *value) {
+    statement_t *res = statement_make(alloc, STATEMENT_EXPRESSION);
     res->expression = value;
     return res;
 }
 
-statement_t* statement_make_while_loop(expression_t *test, code_block_t *body) {
-    statement_t *res = statement_make(STATEMENT_WHILE_LOOP);
+statement_t* statement_make_while_loop(allocator_t *alloc, expression_t *test, code_block_t *body) {
+    statement_t *res = statement_make(alloc, STATEMENT_WHILE_LOOP);
     res->while_loop.test = test;
     res->while_loop.body = body;
     return res;
 }
 
-statement_t* statement_make_break() {
-    statement_t *res = statement_make(STATEMENT_BREAK);
+statement_t* statement_make_break(allocator_t *alloc) {
+    statement_t *res = statement_make(alloc, STATEMENT_BREAK);
     return res;
 }
 
-statement_t* statement_make_foreach(ident_t *iterator, expression_t *source, code_block_t *body) {
-    statement_t *res = statement_make(STATEMENT_FOREACH);
+statement_t* statement_make_foreach(allocator_t *alloc, ident_t *iterator, expression_t *source, code_block_t *body) {
+    statement_t *res = statement_make(alloc, STATEMENT_FOREACH);
     res->foreach.iterator = iterator;
     res->foreach.source = source;
     res->foreach.body = body;
     return res;
 }
 
-statement_t* statement_make_for_loop(statement_t *init, expression_t *test, expression_t *update, code_block_t *body) {
-    statement_t *res = statement_make(STATEMENT_FOR_LOOP);
+statement_t* statement_make_for_loop(allocator_t *alloc, statement_t *init, expression_t *test, expression_t *update, code_block_t *body) {
+    statement_t *res = statement_make(alloc, STATEMENT_FOR_LOOP);
     res->for_loop.init = init;
     res->for_loop.test = test;
     res->for_loop.update = update;
@@ -3909,25 +4005,25 @@ statement_t* statement_make_for_loop(statement_t *init, expression_t *test, expr
     return res;
 }
 
-statement_t* statement_make_continue() {
-    statement_t *res = statement_make(STATEMENT_CONTINUE);
+statement_t* statement_make_continue(allocator_t *alloc) {
+    statement_t *res = statement_make(alloc, STATEMENT_CONTINUE);
     return res;
 }
 
-statement_t* statement_make_block(code_block_t *block) {
-    statement_t *res = statement_make(STATEMENT_BLOCK);
+statement_t* statement_make_block(allocator_t *alloc, code_block_t *block) {
+    statement_t *res = statement_make(alloc, STATEMENT_BLOCK);
     res->block = block;
     return res;
 }
 
-statement_t* statement_make_import(char *path) {
-    statement_t *res = statement_make(STATEMENT_IMPORT);
+statement_t* statement_make_import(allocator_t *alloc, char *path) {
+    statement_t *res = statement_make(alloc, STATEMENT_IMPORT);
     res->import.path = path;
     return res;
 }
 
-statement_t* statement_make_recover(ident_t *error_ident, code_block_t *body) {
-    statement_t *res = statement_make(STATEMENT_RECOVER);
+statement_t* statement_make_recover(allocator_t *alloc, ident_t *error_ident, code_block_t *body) {
+    statement_t *res = statement_make(alloc, STATEMENT_RECOVER);
     res->recover.error_ident = error_ident;
     res->recover.body = body;
     return res;
@@ -3989,7 +4085,7 @@ void statement_destroy(statement_t *stmt) {
             break;
         }
         case STATEMENT_IMPORT: {
-            ape_free(stmt->import.path);
+            allocator_free(stmt->alloc, stmt->import.path);
             break;
         }
         case STATEMENT_RECOVER: {
@@ -3998,7 +4094,7 @@ void statement_destroy(statement_t *stmt) {
             break;
         }
     }
-    ape_free(stmt);
+    allocator_free(stmt->alloc, stmt);
 }
 
 statement_t* statement_copy(const statement_t *stmt) {
@@ -4013,51 +4109,51 @@ statement_t* statement_copy(const statement_t *stmt) {
         }
         case STATEMENT_DEFINE: {
             expression_t *value_copy = expression_copy(stmt->define.value);
-            res = statement_make_define(ident_copy(stmt->define.name), value_copy, stmt->define.assignable);
+            res = statement_make_define(stmt->alloc, ident_copy(stmt->define.name), value_copy, stmt->define.assignable);
             break;
         }
         case STATEMENT_IF: {
-            ptrarray(if_case_t) *cases_copy = ptrarray_make();
+            ptrarray(if_case_t) *cases_copy = ptrarray_make(stmt->alloc);
             for (int i = 0; i < ptrarray_count(stmt->if_statement.cases); i++) {
                 if_case_t *if_case = ptrarray_get(stmt->if_statement.cases, i);
                 expression_t *test_copy = expression_copy(if_case->test);
                 code_block_t *consequence_copy = code_block_copy(if_case->consequence);
-                if_case_t *if_case_copy = if_case_make(test_copy, consequence_copy);
+                if_case_t *if_case_copy = if_case_make(stmt->alloc, test_copy, consequence_copy);
                 ptrarray_add(cases_copy, if_case_copy);
 
             }
             code_block_t *alternative_copy = code_block_copy(stmt->if_statement.alternative);
-            res = statement_make_if(cases_copy, alternative_copy);
+            res = statement_make_if(stmt->alloc, cases_copy, alternative_copy);
             break;
         }
         case STATEMENT_RETURN_VALUE: {
             expression_t *value_copy = expression_copy(stmt->return_value);
-            res = statement_make_return(value_copy);
+            res = statement_make_return(stmt->alloc, value_copy);
             break;
         }
         case STATEMENT_EXPRESSION: {
             expression_t *value_copy = expression_copy(stmt->expression);
-            res = statement_make_expression(value_copy);
+            res = statement_make_expression(stmt->alloc, value_copy);
             break;
         }
         case STATEMENT_WHILE_LOOP: {
             expression_t *test_copy = expression_copy(stmt->while_loop.test);
             code_block_t *body_copy = code_block_copy(stmt->while_loop.body);
-            res = statement_make_while_loop(test_copy, body_copy);
+            res = statement_make_while_loop(stmt->alloc, test_copy, body_copy);
             break;
         }
         case STATEMENT_BREAK: {
-            res = statement_make_break();
+            res = statement_make_break(stmt->alloc);
             break;
         }
         case STATEMENT_CONTINUE: {
-            res = statement_make_continue();
+            res = statement_make_continue(stmt->alloc);
             break;
         }
         case STATEMENT_FOREACH: {
             expression_t *source_copy = expression_copy(stmt->foreach.source);
             code_block_t *body_copy = code_block_copy(stmt->foreach.body);
-            res = statement_make_foreach(ident_copy(stmt->foreach.iterator), source_copy, body_copy);
+            res = statement_make_foreach(stmt->alloc, ident_copy(stmt->foreach.iterator), source_copy, body_copy);
             break;
         }
         case STATEMENT_FOR_LOOP: {
@@ -4065,21 +4161,21 @@ statement_t* statement_copy(const statement_t *stmt) {
             expression_t *test_copy = expression_copy(stmt->for_loop.test);
             expression_t *update_copy = expression_copy(stmt->for_loop.update);
             code_block_t *body_copy = code_block_copy(stmt->for_loop.body);
-            res = statement_make_for_loop(init_copy, test_copy, update_copy, body_copy);
+            res = statement_make_for_loop(stmt->alloc, init_copy, test_copy, update_copy, body_copy);
             break;
         }
         case STATEMENT_BLOCK: {
             code_block_t *block_copy = code_block_copy(stmt->block);
-            res = statement_make_block(block_copy);
+            res = statement_make_block(stmt->alloc, block_copy);
             break;
         }
         case STATEMENT_IMPORT: {
-            res = statement_make_import(ape_strdup(stmt->import.path));
+            res = statement_make_import(stmt->alloc, ape_strdup(stmt->alloc, stmt->import.path));
             break;
         }
         case STATEMENT_RECOVER: {
             code_block_t *body_copy = code_block_copy(stmt->recover.body);
-            res = statement_make_recover(ident_copy(stmt->recover.error_ident), body_copy);
+            res = statement_make_recover(stmt->alloc, ident_copy(stmt->recover.error_ident), body_copy);
             break;
         }
     }
@@ -4087,10 +4183,11 @@ statement_t* statement_copy(const statement_t *stmt) {
     return res;
 }
 
-code_block_t* code_block_make(ptrarray(statement_t) *statements) {
-    code_block_t *stmt = ape_malloc(sizeof(code_block_t));
-    stmt->statements = statements;
-    return stmt;
+code_block_t* code_block_make(allocator_t *alloc, ptrarray(statement_t) *statements) {
+    code_block_t *block = allocator_malloc(alloc, sizeof(code_block_t));
+    block->alloc = alloc;
+    block->statements = statements;
+    return block;
 }
 
 void code_block_destroy(code_block_t *block) {
@@ -4098,24 +4195,24 @@ void code_block_destroy(code_block_t *block) {
         return;
     }
     ptrarray_destroy_with_items(block->statements, statement_destroy);
-    ape_free(block);
+    allocator_free(block->alloc, block);
 }
 
 code_block_t* code_block_copy(code_block_t *block) {
     if (!block) {
         return NULL;
     }
-    ptrarray(statement_t) *statements_copy = ptrarray_make();
+    ptrarray(statement_t) *statements_copy = ptrarray_make(block->alloc);
     for (int i = 0; i < ptrarray_count(block->statements); i++) {
         statement_t *statement = ptrarray_get(block->statements, i);
         statement_t *copy = statement_copy(statement);
         ptrarray_add(statements_copy, copy);
     }
-    return code_block_make(statements_copy);
+    return code_block_make(block->alloc, statements_copy);
 }
 
-char* statements_to_string(ptrarray(statement_t) *statements) {
-    strbuf_t *buf = strbuf_make();
+char* statements_to_string(allocator_t *alloc, ptrarray(statement_t) *statements) {
+    strbuf_t *buf = strbuf_make(alloc);
     int count =  ptrarray_count(statements);
     for (int i = 0; i < count; i++) {
         const statement_t *stmt = ptrarray_get(statements, i);
@@ -4432,22 +4529,18 @@ const char *expression_type_to_string(expression_type_t type) {
     }
 }
 
-void fn_literal_deinit(fn_literal_t *fn) {
-    ape_free(fn->name);
-    ptrarray_destroy_with_items(fn->params, ident_destroy);
-    code_block_destroy(fn->body);
-}
-
-ident_t* ident_make(token_t tok) {
-    ident_t *res = ape_malloc(sizeof(ident_t));
-    res->value = token_duplicate_literal(&tok);
+ident_t* ident_make(allocator_t *alloc, token_t tok) {
+    ident_t *res = allocator_malloc(alloc, sizeof(ident_t));
+    res->alloc = alloc;
+    res->value = token_duplicate_literal(alloc, &tok);
     res->pos = tok.pos;
     return res;
 }
 
 ident_t* ident_copy(const ident_t *ident) {
-    ident_t *res = ape_malloc(sizeof(ident_t));
-    res->value = ape_strdup(ident->value);
+    ident_t *res = allocator_malloc(ident->alloc, sizeof(ident_t));
+    res->alloc = ident->alloc;
+    res->value = ape_strdup(ident->alloc, ident->value);
     res->pos = ident->pos;
     return res;
 }
@@ -4456,14 +4549,15 @@ void ident_destroy(ident_t *ident) {
     if (!ident) {
         return;
     }
-    ape_free(ident->value);
+    allocator_free(ident->alloc, ident->value);
     ident->value = NULL;
     ident->pos = src_pos_invalid;
-    ape_free(ident);
+    allocator_free(ident->alloc, ident);
 }
 
-if_case_t *if_case_make(expression_t *test, code_block_t *consequence) {
-    if_case_t *res = ape_malloc(sizeof(if_case_t));
+if_case_t *if_case_make(allocator_t *alloc, expression_t *test, code_block_t *consequence) {
+    if_case_t *res = allocator_malloc(alloc, sizeof(if_case_t));
+    res->alloc = alloc;
     res->test = test;
     res->consequence = consequence;
     return res;
@@ -4473,22 +4567,23 @@ void if_case_destroy(if_case_t *cond) {
     if (!cond) {
         return;
     }
-
     expression_destroy(cond->test);
     code_block_destroy(cond->consequence);
-    ape_free(cond);
+    allocator_free(cond->alloc, cond);
 }
 
 // INTERNAL
-static expression_t *expression_make(expression_type_t type) {
-    expression_t *res = ape_malloc(sizeof(expression_t));
+static expression_t *expression_make(allocator_t *alloc, expression_type_t type) {
+    expression_t *res = allocator_malloc(alloc, sizeof(expression_t));
+    res->alloc = alloc;
     res->type = type;
     res->pos = src_pos_invalid;
     return res;
 }
 
-static statement_t* statement_make(statement_type_t type) {
-    statement_t *res = ape_malloc(sizeof(statement_t));
+static statement_t* statement_make(allocator_t *alloc, statement_type_t type) {
+    statement_t *res = allocator_malloc(alloc, sizeof(statement_t));
+    res->alloc = alloc;
     res->type = type;
     res->pos = src_pos_invalid;
     return res;
@@ -4572,13 +4667,13 @@ static bool peek_token_is(parser_t *p, token_type_t type);
 static bool expect_current(parser_t *p, token_type_t type);
 
 static char escape_char(const char c);
-static char* process_and_copy_string(const char *input, size_t len);
+static char* process_and_copy_string(allocator_t *alloc, const char *input, size_t len);
 
-parser_t* parser_make(const ape_config_t *config, ptrarray(error_t) *errors) {
-    parser_t *parser = ape_malloc(sizeof(parser_t));
+parser_t* parser_make(allocator_t *alloc, const ape_config_t *config, ptrarray(error_t) *errors) {
+    parser_t *parser = allocator_malloc(alloc, sizeof(parser_t));
     memset(parser, 0, sizeof(parser_t));
-    APE_ASSERT(config);
 
+    parser->alloc = alloc;
     parser->config = config;
     parser->errors = errors;
 
@@ -4637,19 +4732,18 @@ void parser_destroy(parser_t *parser) {
     if (!parser) {
         return;
     }
-    memset(parser, 0, sizeof(parser_t));
-    ape_free(parser);
+    allocator_free(parser->alloc, parser);
 }
 
 ptrarray(statement_t)* parser_parse_all(parser_t *parser,  const char *input, compiled_file_t *file) {
     parser->depth = 0;
 
-    lexer_init(&parser->lexer, input, file);
+    lexer_init(&parser->lexer, parser->alloc, input, file);
 
     next_token(parser);
     next_token(parser);
 
-    ptrarray(statement_t)* statements = ptrarray_make();
+    ptrarray(statement_t)* statements = ptrarray_make(parser->alloc);
 
     while (!cur_token_is(parser, TOKEN_EOF)) {
         if (cur_token_is(parser, TOKEN_SEMICOLON)) {
@@ -4761,7 +4855,7 @@ static statement_t* parse_define_statement(parser_t *p) {
         goto err;
     }
 
-    name_ident = ident_make(p->cur_token);
+    name_ident = ident_make(p->alloc, p->cur_token);
 
     next_token(p);
 
@@ -4777,10 +4871,10 @@ static statement_t* parse_define_statement(parser_t *p) {
     }
 
     if (value->type == EXPRESSION_FUNCTION_LITERAL) {
-        value->fn_literal.name = ape_strdup(name_ident->value);
+        value->fn_literal.name = ape_strdup(p->alloc, name_ident->value);
     }
 
-    return statement_make_define(name_ident, value, assignable);
+    return statement_make_define(p->alloc, name_ident, value, assignable);
 err:
     expression_destroy(value);
     ident_destroy(name_ident);
@@ -4788,7 +4882,7 @@ err:
 }
 
 static statement_t* parse_if_statement(parser_t *p) {
-    ptrarray(if_case_t) *cases = ptrarray_make();
+    ptrarray(if_case_t) *cases = ptrarray_make(p->alloc);
     code_block_t *alternative = NULL;
 
     next_token(p);
@@ -4799,7 +4893,7 @@ static statement_t* parse_if_statement(parser_t *p) {
 
     next_token(p);
 
-    if_case_t *cond = if_case_make(NULL, NULL);
+    if_case_t *cond = if_case_make(p->alloc, NULL, NULL);
     ptrarray_add(cases, cond);
 
     cond->test = parse_expression(p, PRECEDENCE_LOWEST);
@@ -4830,7 +4924,7 @@ static statement_t* parse_if_statement(parser_t *p) {
 
             next_token(p);
 
-            if_case_t *elif = if_case_make(NULL, NULL);
+            if_case_t *elif = if_case_make(p->alloc, NULL, NULL);
             ptrarray_add(cases, elif);
 
             elif->test = parse_expression(p, PRECEDENCE_LOWEST);
@@ -4856,7 +4950,7 @@ static statement_t* parse_if_statement(parser_t *p) {
         }
     }
 
-    return statement_make_if(cases, alternative);
+    return statement_make_if(p->alloc, cases, alternative);
 err:
     ptrarray_destroy_with_items(cases, if_case_destroy);
     code_block_destroy(alternative);
@@ -4875,7 +4969,7 @@ static statement_t* parse_return_statement(parser_t *p) {
         }
     }
 
-    return statement_make_return(expr);
+    return statement_make_return(p->alloc, expr);
 }
 
 static statement_t* parse_expression_statement(parser_t *p) {
@@ -4886,7 +4980,7 @@ static statement_t* parse_expression_statement(parser_t *p) {
 
     if (expr && (!p->config->repl_mode || p->depth > 0)) {
         if (expr->type != EXPRESSION_ASSIGN && expr->type != EXPRESSION_CALL) {
-            error_t *err = error_makef(ERROR_PARSING, expr->pos,
+            error_t *err = error_makef(p->alloc, ERROR_PARSING, expr->pos,
                                        "Only assignments and function calls can be expression statements");
             ptrarray_add(p->errors, err);
             expression_destroy(expr);
@@ -4894,7 +4988,7 @@ static statement_t* parse_expression_statement(parser_t *p) {
         }
     }
 
-    return statement_make_expression(expr);
+    return statement_make_expression(p->alloc, expr);
 }
 
 static statement_t* parse_while_loop_statement(parser_t *p) {
@@ -4924,7 +5018,7 @@ static statement_t* parse_while_loop_statement(parser_t *p) {
         goto err;
     }
 
-    return statement_make_while_loop(test, body);
+    return statement_make_while_loop(p->alloc, test, body);
 err:
     expression_destroy(test);
     return NULL;
@@ -4932,12 +5026,12 @@ err:
 
 static statement_t* parse_break_statement(parser_t *p) {
     next_token(p);
-    return statement_make_break();
+    return statement_make_break(p->alloc);
 }
 
 static statement_t* parse_continue_statement(parser_t *p) {
     next_token(p);
-    return statement_make_continue();
+    return statement_make_continue(p->alloc);
 }
 
 static statement_t* parse_block_statement(parser_t *p) {
@@ -4945,7 +5039,7 @@ static statement_t* parse_block_statement(parser_t *p) {
     if (!block) {
         return NULL;
     }
-    return statement_make_block(block);
+    return statement_make_block(p->alloc, block);
 }
 
 static statement_t* parse_import_statement(parser_t *p) {
@@ -4955,14 +5049,14 @@ static statement_t* parse_import_statement(parser_t *p) {
         return NULL;
     }
 
-    char *processed_name = process_and_copy_string(p->cur_token.literal, p->cur_token.len);
+    char *processed_name = process_and_copy_string(p->alloc, p->cur_token.literal, p->cur_token.len);
     if (!processed_name) {
-        error_t *err = error_make(ERROR_PARSING, p->cur_token.pos, "Error when parsing module name");
+        error_t *err = error_make(p->alloc, ERROR_PARSING, p->cur_token.pos, "Error when parsing module name");
         ptrarray_add(p->errors, err);
         return NULL;
     }
     next_token(p);
-    statement_t *result = statement_make_import(processed_name);
+    statement_t *result = statement_make_import(p->alloc, processed_name);
     return result;
 }
 
@@ -4978,7 +5072,7 @@ static statement_t* parse_recover_statement(parser_t *p) {
         return NULL;
     }
 
-    ident_t *error_ident = ident_make(p->cur_token);
+    ident_t *error_ident = ident_make(p->alloc, p->cur_token);
     next_token(p);
 
     if (!expect_current(p, TOKEN_RPAREN)) {
@@ -4991,7 +5085,7 @@ static statement_t* parse_recover_statement(parser_t *p) {
         goto err;
     }
 
-    return statement_make_recover(error_ident, body);
+    return statement_make_recover(p->alloc, error_ident, body);
 err:
     ident_destroy(error_ident);
     return NULL;
@@ -5016,7 +5110,7 @@ static statement_t* parse_for_loop_statement(parser_t *p) {
 
 static statement_t* parse_foreach(parser_t *p) {
     expression_t *source = NULL;
-    ident_t *iterator_ident = ident_make(p->cur_token);
+    ident_t *iterator_ident = ident_make(p->alloc, p->cur_token);
 
     next_token(p);
 
@@ -5042,7 +5136,7 @@ static statement_t* parse_foreach(parser_t *p) {
         goto err;
     }
 
-    return statement_make_foreach(iterator_ident, source, body);
+    return statement_make_foreach(p->alloc, iterator_ident, source, body);
 err:
     ident_destroy(iterator_ident);
     expression_destroy(source);
@@ -5061,7 +5155,7 @@ static statement_t* parse_classic_for_loop(parser_t *p) {
             goto err;
         }
         if (init->type != STATEMENT_DEFINE && init->type != STATEMENT_EXPRESSION) {
-            error_t *err = error_makef(ERROR_PARSING, init->pos,
+            error_t *err = error_makef(p->alloc, ERROR_PARSING, init->pos,
                                        "for loop's init clause should be a define statement or an expression");
             ptrarray_add(p->errors, err);
             goto err;
@@ -5102,7 +5196,7 @@ static statement_t* parse_classic_for_loop(parser_t *p) {
         goto err;
     }
 
-    return statement_make_for_loop(init, test, update, body);
+    return statement_make_for_loop(p->alloc, init, test, update, body);
 err:
     statement_destroy(init);
     expression_destroy(test);
@@ -5123,7 +5217,7 @@ static statement_t* parse_function_statement(parser_t *p) {
         goto err;
     }
 
-    name_ident = ident_make(p->cur_token);
+    name_ident = ident_make(p->alloc, p->cur_token);
 
     next_token(p);
 
@@ -5133,9 +5227,9 @@ static statement_t* parse_function_statement(parser_t *p) {
     }
 
     value->pos = pos;
-    value->fn_literal.name = ape_strdup(name_ident->value);
+    value->fn_literal.name = ape_strdup(p->alloc, name_ident->value);
 
-    return statement_make_define(name_ident, value, false);
+    return statement_make_define(p->alloc, name_ident, value, false);
 err:
     expression_destroy(value);
     ident_destroy(name_ident);
@@ -5150,11 +5244,11 @@ static code_block_t* parse_code_block(parser_t *p) {
     next_token(p);
     p->depth++;
 
-    ptrarray(statement_t)* statements = ptrarray_make();
+    ptrarray(statement_t)* statements = ptrarray_make(p->alloc);
 
     while (!cur_token_is(p, TOKEN_RBRACE)) {
         if (cur_token_is(p, TOKEN_EOF)) {
-            error_t *err = error_make(ERROR_PARSING, p->cur_token.pos, "Unexpected EOF");
+            error_t *err = error_make(p->alloc, ERROR_PARSING, p->cur_token.pos, "Unexpected EOF");
             ptrarray_add(p->errors, err);
             goto err;
         }
@@ -5174,7 +5268,7 @@ static code_block_t* parse_code_block(parser_t *p) {
 
     p->depth--;
     
-    return code_block_make(statements);
+    return code_block_make(p->alloc, statements);
 
 err:
     p->depth--;
@@ -5186,18 +5280,18 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
     src_pos_t pos = p->cur_token.pos;
 
     if (p->cur_token.type == TOKEN_ILLEGAL) {
-        error_t *err = error_make(ERROR_PARSING, p->cur_token.pos, "Illegal token");
+        error_t *err = error_make(p->alloc, ERROR_PARSING, p->cur_token.pos, "Illegal token");
         ptrarray_add(p->errors, err);
         return NULL;
     }
 
     prefix_parse_fn prefix = p->prefix_parse_fns[p->cur_token.type];
     if (!prefix) {
-        char *literal = token_duplicate_literal(&p->cur_token);
-        error_t *err = error_makef(ERROR_PARSING, p->cur_token.pos,
+        char *literal = token_duplicate_literal(p->alloc, &p->cur_token);
+        error_t *err = error_makef(p->alloc, ERROR_PARSING, p->cur_token.pos,
                                   "No prefix parse function for \"%s\" found", literal);
         ptrarray_add(p->errors, err);
-        ape_free(literal);
+        allocator_free(p->alloc, literal);
         return NULL;
     }
 
@@ -5226,8 +5320,8 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
 }
 
 static expression_t* parse_identifier(parser_t *p) {
-    ident_t *ident = ident_make(p->cur_token);
-    expression_t *res = expression_make_ident(ident);
+    ident_t *ident = ident_make(p->alloc, p->cur_token);
+    expression_t *res = expression_make_ident(p->alloc, ident);
     next_token(p);
     return res;
 }
@@ -5239,37 +5333,37 @@ static expression_t* parse_number_literal(parser_t *p) {
     number = strtod(p->cur_token.literal, &end);
     long parsed_len = end - p->cur_token.literal;
     if (errno || parsed_len != p->cur_token.len) {
-        char *literal = token_duplicate_literal(&p->cur_token);
-        error_t *err = error_makef(ERROR_PARSING, p->cur_token.pos,
+        char *literal = token_duplicate_literal(p->alloc, &p->cur_token);
+        error_t *err = error_makef(p->alloc, ERROR_PARSING, p->cur_token.pos,
                                   "Parsing number literal \"%s\" failed", literal);
         ptrarray_add(p->errors, err);
-        ape_free(literal);
+        allocator_free(p->alloc, literal);
         return NULL;
     }
     next_token(p);
-    return expression_make_number_literal(number);
+    return expression_make_number_literal(p->alloc, number);
 }
 
 static expression_t* parse_bool_literal(parser_t *p) {
-    expression_t *res = expression_make_bool_literal(p->cur_token.type == TOKEN_TRUE);
+    expression_t *res = expression_make_bool_literal(p->alloc, p->cur_token.type == TOKEN_TRUE);
     next_token(p);
     return res;
 }
 
 static expression_t* parse_string_literal(parser_t *p) {
-    char *processed_literal = process_and_copy_string(p->cur_token.literal, p->cur_token.len);
+    char *processed_literal = process_and_copy_string(p->alloc, p->cur_token.literal, p->cur_token.len);
     if (!processed_literal) {
-        error_t *err = error_make(ERROR_PARSING, p->cur_token.pos, "Error when parsing string literal");
+        error_t *err = error_make(p->alloc, ERROR_PARSING, p->cur_token.pos, "Error when parsing string literal");
         ptrarray_add(p->errors, err);
         return NULL;
     }
     next_token(p);
-    return expression_make_string_literal(processed_literal);
+    return expression_make_string_literal(p->alloc, processed_literal);
 }
 
 static expression_t* parse_null_literal(parser_t *p) {
     next_token(p);
-    return expression_make_null_literal();
+    return expression_make_null_literal(p->alloc);
 }
 
 static expression_t* parse_array_literal(parser_t *p) {
@@ -5277,19 +5371,19 @@ static expression_t* parse_array_literal(parser_t *p) {
     if (!array) {
         return NULL;
     }
-    return expression_make_array_literal(array);
+    return expression_make_array_literal(p->alloc, array);
 }
 
 static expression_t* parse_map_literal(parser_t *p) {
-    ptrarray(expression_t) *keys = ptrarray_make();
-    ptrarray(expression_t) *values = ptrarray_make();
+    ptrarray(expression_t) *keys = ptrarray_make(p->alloc);
+    ptrarray(expression_t) *values = ptrarray_make(p->alloc);
 
     next_token(p);
 
     while (!cur_token_is(p, TOKEN_RBRACE)) {
         expression_t *key = NULL;
         if (cur_token_is(p, TOKEN_IDENT)) {
-            key = expression_make_string_literal(token_duplicate_literal(&p->cur_token));
+            key = expression_make_string_literal(p->alloc, token_duplicate_literal(p->alloc, &p->cur_token));
             key->pos = p->cur_token.pos;
             next_token(p);
         } else {
@@ -5304,7 +5398,7 @@ static expression_t* parse_map_literal(parser_t *p) {
                     break;
                 }
                 default: {
-                    error_t *err = error_makef(ERROR_PARSING, key->pos, "Invalid map literal key type");
+                    error_t *err = error_makef(p->alloc, ERROR_PARSING, key->pos, "Invalid map literal key type");
                     ptrarray_add(p->errors, err);
                     expression_destroy(key);
                     goto err;
@@ -5343,7 +5437,7 @@ static expression_t* parse_map_literal(parser_t *p) {
 
     next_token(p);
 
-    return expression_make_map_literal(keys, values);
+    return expression_make_map_literal(p->alloc, keys, values);
 err:
     ptrarray_destroy_with_items(keys, expression_destroy);
     ptrarray_destroy_with_items(values, expression_destroy);
@@ -5357,7 +5451,7 @@ static expression_t* parse_prefix_expression(parser_t *p) {
     if (!right) {
         return NULL;
     }
-    return expression_make_prefix(op, right);
+    return expression_make_prefix(p->alloc, op, right);
 }
 
 static expression_t* parse_infix_expression(parser_t *p, expression_t *left) {
@@ -5368,7 +5462,7 @@ static expression_t* parse_infix_expression(parser_t *p, expression_t *left) {
     if (!right) {
         return NULL;
     }
-    return expression_make_infix(op, left, right);
+    return expression_make_infix(p->alloc, op, left, right);
 }
 
 static expression_t* parse_grouped_expression(parser_t *p) {
@@ -5391,7 +5485,7 @@ static expression_t* parse_function_literal(parser_t *p) {
         next_token(p);
     }
 
-    params = ptrarray_make();
+    params = ptrarray_make(p->alloc);
 
     bool ok = parse_function_parameters(p, params);
 
@@ -5406,7 +5500,7 @@ static expression_t* parse_function_literal(parser_t *p) {
 
     p->depth -= 1;
 
-    return expression_make_fn_literal(params, body);
+    return expression_make_fn_literal(p->alloc, params, body);
 err:
     code_block_destroy(body);
     ptrarray_destroy_with_items(params, ident_destroy);
@@ -5430,7 +5524,7 @@ static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params
         return false;
     }
 
-    ident_t *ident = ident_make(p->cur_token);
+    ident_t *ident = ident_make(p->alloc, p->cur_token);
     ptrarray_add(out_params, ident);
 
     next_token(p);
@@ -5442,7 +5536,7 @@ static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params
             return false;
         }
 
-        ident_t *ident = ident_make(p->cur_token);
+        ident_t *ident = ident_make(p->alloc, p->cur_token);
         ptrarray_add(out_params, ident);
 
         next_token(p);
@@ -5463,7 +5557,7 @@ static expression_t* parse_call_expression(parser_t *p, expression_t *left) {
     if (!args) {
         return NULL;
     }
-    return expression_make_call(function, args);
+    return expression_make_call(p->alloc, function, args);
 }
 
 static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t start_token, token_type_t end_token, bool trailing_comma_allowed) {
@@ -5473,7 +5567,7 @@ static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t s
 
     next_token(p);
 
-    ptrarray(expression_t)* res = ptrarray_make();
+    ptrarray(expression_t)* res = ptrarray_make(p->alloc);
 
     if (cur_token_is(p, end_token)) {
         next_token(p);
@@ -5527,7 +5621,7 @@ static expression_t* parse_index_expression(parser_t *p, expression_t *left) {
 
     next_token(p);
 
-    return expression_make_index(left, index);
+    return expression_make_index(p->alloc, left, index);
 }
 
 static expression_t* parse_assign_expression(parser_t *p, expression_t *left) {
@@ -5560,7 +5654,7 @@ static expression_t* parse_assign_expression(parser_t *p, expression_t *left) {
                 goto err;
             }
             src_pos_t pos = source->pos;
-            expression_t *new_source = expression_make_infix(op, left_copy, source);
+            expression_t *new_source = expression_make_infix(p->alloc, op, left_copy, source);
             if (!new_source) {
                 goto err;
             }
@@ -5572,7 +5666,7 @@ static expression_t* parse_assign_expression(parser_t *p, expression_t *left) {
         default: APE_ASSERT(false); break;
     }
 
-    return expression_make_assign(left, source);
+    return expression_make_assign(p->alloc, left, source);
 err:
     expression_destroy(left_copy);
     expression_destroy(source);
@@ -5587,7 +5681,7 @@ static expression_t* parse_logical_expression(parser_t *p, expression_t *left) {
     if (!right) {
         return NULL;
     }
-    return expression_make_logical(op, left, right);
+    return expression_make_logical(p->alloc, op, left, right);
 }
 
 static expression_t* parse_dot_expression(parser_t *p, expression_t *left) {
@@ -5597,7 +5691,7 @@ static expression_t* parse_dot_expression(parser_t *p, expression_t *left) {
         return NULL;
     }
 
-    expression_t *index = expression_make_string_literal(token_duplicate_literal(&p->cur_token));
+    expression_t *index = expression_make_string_literal(p->alloc, token_duplicate_literal(p->alloc, &p->cur_token));
     if (!index) {
         return NULL;
     }
@@ -5605,7 +5699,7 @@ static expression_t* parse_dot_expression(parser_t *p, expression_t *left) {
 
     next_token(p);
 
-    return expression_make_index(left, index);
+    return expression_make_index(p->alloc, left, index);
 }
 
 static precedence_t get_precedence(token_type_t tk) {
@@ -5697,7 +5791,7 @@ static bool expect_current(parser_t *p, token_type_t type) {
     if (!cur_token_is(p, type)) {
         const char *expected_type_str = token_type_to_string(type);
         const char *actual_type_str = token_type_to_string(p->cur_token.type);
-        error_t *err = error_makef(ERROR_PARSING, p->cur_token.pos,
+        error_t *err = error_makef(p->alloc, ERROR_PARSING, p->cur_token.pos,
                                    "Expected current token to be \"%s\", got \"%s\" instead",
                                    expected_type_str, actual_type_str);
         ptrarray_add(p->errors, err);
@@ -5724,8 +5818,8 @@ static char escape_char(const char c) {
     }
 }
 
-static char* process_and_copy_string(const char *input, size_t len) {
-    char *output = ape_malloc(len + 1);
+static char* process_and_copy_string(allocator_t *alloc, const char *input, size_t len) {
+    char *output = allocator_malloc(alloc, len + 1);
 
     size_t in_i = 0;
     size_t out_i = 0;
@@ -5746,7 +5840,7 @@ static char* process_and_copy_string(const char *input, size_t len) {
     output[out_i] = '\0';
     return output;
 error:
-    ape_free(output);
+    allocator_free(alloc, output);
     return NULL;
 }
 //FILE_END
@@ -5765,9 +5859,10 @@ static void set_symbol(symbol_table_t *table, symbol_t *symbol);
 static int next_symbol_index(symbol_table_t *table);
 static int count_num_definitions(symbol_table_t *table);
 
-symbol_t *symbol_make(const char *name, symbol_type_t type, int index, bool assignable) {
-    symbol_t *symbol = ape_malloc(sizeof(symbol_t));
-    symbol->name = ape_strdup(name);
+symbol_t *symbol_make(allocator_t *alloc, const char *name, symbol_type_t type, int index, bool assignable) {
+    symbol_t *symbol = allocator_malloc(alloc, sizeof(symbol_t));
+    symbol->alloc = alloc;
+    symbol->name = ape_strdup(alloc, name);
     symbol->type = type;
     symbol->index = index;
     symbol->assignable = assignable;
@@ -5778,22 +5873,23 @@ void symbol_destroy(symbol_t *symbol) {
     if (!symbol) {
         return;
     }
-    ape_free(symbol->name);
-    ape_free(symbol);
+    allocator_free(symbol->alloc, symbol->name);
+    allocator_free(symbol->alloc, symbol);
 }
 
-symbol_t* symbol_copy(const symbol_t *symbol) {
-    return symbol_make(symbol->name, symbol->type, symbol->index, symbol->assignable);
+symbol_t* symbol_copy(symbol_t *symbol) {
+    return symbol_make(symbol->alloc, symbol->name, symbol->type, symbol->index, symbol->assignable);
 }
 
-symbol_table_t *symbol_table_make(symbol_table_t *outer) {
-    symbol_table_t *table = ape_malloc(sizeof(symbol_table_t));
+symbol_table_t *symbol_table_make(allocator_t *alloc, symbol_table_t *outer) {
+    symbol_table_t *table = allocator_malloc(alloc, sizeof(symbol_table_t));
     memset(table, 0, sizeof(symbol_table_t));
+    table->alloc = alloc;
     table->max_num_definitions = 0;
     table->outer = outer;
-    table->block_scopes = ptrarray_make();
+    table->block_scopes = ptrarray_make(alloc);
     symbol_table_push_block_scope(table);
-    table->free_symbols = ptrarray_make();
+    table->free_symbols = ptrarray_make(alloc);
     if (!outer) {
         for (int i = 0; i < builtins_count(); i++) {
             const char *name = builtins_get_name(i);
@@ -5813,12 +5909,16 @@ void symbol_table_destroy(symbol_table_t *table) {
     }
     ptrarray_destroy(table->block_scopes);
     ptrarray_destroy_with_items(table->free_symbols, symbol_destroy);
-    ape_free(table);
+    allocator_free(table->alloc, table);
 }
 
 symbol_table_t* symbol_table_copy(symbol_table_t *table) {
-    symbol_table_t *copy = ape_malloc(sizeof(symbol_table_t));
+    symbol_table_t *copy = allocator_malloc(table->alloc, sizeof(symbol_table_t));
+    if (!copy) {
+        return NULL;
+    }
     memset(copy, 0, sizeof(symbol_table_t));
+    copy->alloc = table->alloc;
     copy->outer = table->outer;
     copy->block_scopes = ptrarray_copy_with_items(table->block_scopes, block_scope_copy);
     copy->free_symbols = ptrarray_copy_with_items(table->free_symbols, symbol_copy);
@@ -5826,7 +5926,7 @@ symbol_table_t* symbol_table_copy(symbol_table_t *table) {
     return copy;
 }
 
-void symbol_table_add_module_symbol(symbol_table_t *st, const symbol_t *symbol) {
+void symbol_table_add_module_symbol(symbol_table_t *st, symbol_t *symbol) {
     if (symbol->type != SYMBOL_GLOBAL) {
         APE_ASSERT(false);
         return;
@@ -5847,7 +5947,7 @@ symbol_t *symbol_table_define(symbol_table_t *table, const char *name, bool assi
     }
     symbol_type_t symbol_type = table->outer == NULL ? SYMBOL_GLOBAL : SYMBOL_LOCAL;
     int ix = next_symbol_index(table);
-    symbol_t *symbol = symbol_make(name, symbol_type, ix, assignable);
+    symbol_t *symbol = symbol_make(table->alloc, name, symbol_type, ix, assignable);
     set_symbol(table, symbol);
     block_scope_t *top_scope = ptrarray_top(table->block_scopes);
     top_scope->num_definitions++;
@@ -5859,16 +5959,16 @@ symbol_t *symbol_table_define(symbol_table_t *table, const char *name, bool assi
 }
 
 symbol_t *symbol_table_define_native_function(symbol_table_t *st, const char *name, int ix) {
-    symbol_t *symbol = symbol_make(name, SYMBOL_NATIVE_FUNCTION, ix, false);
+    symbol_t *symbol = symbol_make(st->alloc, name, SYMBOL_NATIVE_FUNCTION, ix, false);
     set_symbol(st, symbol);
     return symbol;
 }
 
 symbol_t *symbol_table_define_free(symbol_table_t *st, symbol_t *original) {
-    symbol_t *copy = symbol_make(original->name, original->type, original->index, original->assignable);
+    symbol_t *copy = symbol_make(st->alloc, original->name, original->type, original->index, original->assignable);
     ptrarray_add(st->free_symbols, copy);
 
-    symbol_t *symbol = symbol_make(original->name, SYMBOL_FREE, ptrarray_count(st->free_symbols) - 1, original->assignable);
+    symbol_t *symbol = symbol_make(st->alloc, original->name, SYMBOL_FREE, ptrarray_count(st->free_symbols) - 1, original->assignable);
     set_symbol(st, symbol);
 
     return symbol;
@@ -5878,13 +5978,13 @@ symbol_t * symbol_table_define_function_name(symbol_table_t *st, const char *nam
     if (strchr(name, ':')) {
         return NULL; // module symbol
     }
-    symbol_t *symbol = symbol_make(name, SYMBOL_FUNCTION, 0, assignable);
+    symbol_t *symbol = symbol_make(st->alloc, name, SYMBOL_FUNCTION, 0, assignable);
     set_symbol(st, symbol);
     return symbol;
 }
 
 symbol_t *symbol_table_define_this(symbol_table_t *st) {
-    symbol_t *symbol = symbol_make("this", SYMBOL_THIS, 0, false);
+    symbol_t *symbol = symbol_make(st->alloc, "this", SYMBOL_THIS, 0, false);
     set_symbol(st, symbol);
     return symbol;
 }
@@ -5924,8 +6024,9 @@ bool symbol_table_symbol_is_defined(symbol_table_t *table, const char *name) { /
 }
 
 void symbol_table_push_block_scope(symbol_table_t *table) {
-    block_scope_t *new_scope = ape_malloc(sizeof(block_scope_t));
-    new_scope->store = dict_make();
+    block_scope_t *new_scope = allocator_malloc(table->alloc, sizeof(block_scope_t));
+    new_scope->alloc = table->alloc;
+    new_scope->store = dict_make(table->alloc);
     new_scope->num_definitions = 0;
     new_scope->offset = count_num_definitions(table);
     ptrarray_push(table->block_scopes, new_scope);
@@ -5935,14 +6036,13 @@ void symbol_table_pop_block_scope(symbol_table_t *table) {
     block_scope_t *top_scope = ptrarray_top(table->block_scopes);
     ptrarray_pop(table->block_scopes);
     dict_destroy_with_items(top_scope->store, symbol_destroy);
-    ape_free(top_scope);
+    allocator_free(table->alloc, top_scope);
 }
 
 block_scope_t* symbol_table_get_block_scope(symbol_table_t *table) {
     block_scope_t *top_scope = ptrarray_top(table->block_scopes);
     return top_scope;
 }
-
 
 bool symbol_table_is_global_scope(symbol_table_t *table) {
     return table->outer == NULL;
@@ -5958,7 +6058,8 @@ bool symbol_table_is_top_global_scope(symbol_table_t *table) {
 
 // INTERNAL
 static block_scope_t* block_scope_copy(block_scope_t *scope) {
-    block_scope_t *copy = ape_malloc(sizeof(block_scope_t));
+    block_scope_t *copy = allocator_malloc(scope->alloc, sizeof(block_scope_t));
+    copy->alloc = scope->alloc;
     copy->num_definitions = scope->num_definitions;
     copy->offset = scope->offset;
     copy->store = dict_copy_with_items(scope->store, symbol_copy);
@@ -6221,23 +6322,25 @@ bool code_read_operands(opcode_definition_t *def, uint8_t *instr, uint64_t out_o
 #include "compilation_scope.h"
 #endif
 
-compilation_scope_t *compilation_scope_make(compilation_scope_t *outer) {
-    compilation_scope_t *scope = ape_malloc(sizeof(compilation_scope_t));
+compilation_scope_t *compilation_scope_make(allocator_t *alloc, compilation_scope_t *outer) {
+    compilation_scope_t *scope = allocator_malloc(alloc, sizeof(compilation_scope_t));
     memset(scope, 0, sizeof(compilation_scope_t));
+    scope->alloc = alloc;
     scope->outer = outer;
-    scope->bytecode = array_make(uint8_t);
-    scope->src_positions = array_make(src_pos_t);
+    scope->bytecode = array_make(alloc, uint8_t);
+    scope->src_positions = array_make(alloc, src_pos_t);
     return scope;
 }
 
 void compilation_scope_destroy(compilation_scope_t *scope) {
     array_destroy(scope->bytecode);
     array_destroy(scope->src_positions);
-    ape_free(scope);
+    allocator_free(scope->alloc, scope);
 }
 
 compilation_result_t* compilation_scope_orphan_result(compilation_scope_t *scope) {
-    compilation_result_t *res = compilation_result_make(array_data(scope->bytecode),
+    compilation_result_t *res = compilation_result_make(scope->alloc,
+                                                        array_data(scope->bytecode),
                                                         array_data(scope->src_positions),
                                                         array_count(scope->bytecode));
     array_orphan_data(scope->bytecode);
@@ -6245,9 +6348,10 @@ compilation_result_t* compilation_scope_orphan_result(compilation_scope_t *scope
     return res;
 }
 
-compilation_result_t* compilation_result_make(uint8_t *bytecode, src_pos_t *src_positions, int count) {
-    compilation_result_t *res = ape_malloc(sizeof(compilation_result_t));
+compilation_result_t* compilation_result_make(allocator_t *alloc, uint8_t *bytecode, src_pos_t *src_positions, int count) {
+    compilation_result_t *res = allocator_malloc(alloc, sizeof(compilation_result_t));
     memset(res, 0, sizeof(compilation_result_t));
+    res->alloc = alloc;
     res->bytecode = bytecode;
     res->src_positions = src_positions;
     res->count = count;
@@ -6258,9 +6362,9 @@ void compilation_result_destroy(compilation_result_t *res) {
     if (!res) {
         return;
     }
-    ape_free(res->bytecode);
-    ape_free(res->src_positions);
-    ape_free(res);
+    allocator_free(res->alloc, res->bytecode);
+    allocator_free(res->alloc, res->src_positions);
+    allocator_free(res->alloc, res);
 }
 //FILE_END
 //FILE_START:optimisation.c
@@ -6268,10 +6372,10 @@ void compilation_result_destroy(compilation_result_t *res) {
 #include "optimisation.h"
 #endif
 
-static expression_t* optimise_infix_expression(const expression_t* expr);
-static expression_t* optimise_prefix_expression(const expression_t* expr);
+static expression_t* optimise_infix_expression(expression_t* expr);
+static expression_t* optimise_prefix_expression(expression_t* expr);
 
-expression_t* optimise_expression(const expression_t* expr) {
+expression_t* optimise_expression(expression_t* expr) {
     switch (expr->type) {
         case EXPRESSION_INFIX: return optimise_infix_expression(expr);
         case EXPRESSION_PREFIX: return optimise_prefix_expression(expr);
@@ -6280,14 +6384,14 @@ expression_t* optimise_expression(const expression_t* expr) {
 }
 
 // INTERNAL
-static expression_t* optimise_infix_expression(const expression_t* expr) {
-    const expression_t *left = expr->infix.left;
+static expression_t* optimise_infix_expression(expression_t* expr) {
+    expression_t *left = expr->infix.left;
     expression_t *left_optimised = optimise_expression(left);
     if (left_optimised) {
         left = left_optimised;
     }
 
-    const expression_t *right = expr->infix.right;
+    expression_t *right = expr->infix.right;
     expression_t *right_optimised = optimise_expression(right);
     if (right_optimised) {
         right = right_optimised;
@@ -6301,28 +6405,29 @@ static expression_t* optimise_infix_expression(const expression_t* expr) {
     bool left_is_string = left->type == EXPRESSION_STRING_LITERAL;
     bool right_is_string = right->type == EXPRESSION_STRING_LITERAL;
 
+    allocator_t *alloc = expr->alloc;
     if (left_is_numeric && right_is_numeric) {
         double left_val = left->type == EXPRESSION_NUMBER_LITERAL ? left->number_literal : left->bool_literal;
         double right_val = right->type == EXPRESSION_NUMBER_LITERAL ? right->number_literal : right->bool_literal;
         int64_t left_val_int = (int64_t)left_val;
         int64_t right_val_int = (int64_t)right_val;
         switch (expr->infix.op) {
-            case OPERATOR_PLUS:     { res = expression_make_number_literal(left_val + right_val); break; }
-            case OPERATOR_MINUS:    { res = expression_make_number_literal(left_val - right_val); break; }
-            case OPERATOR_ASTERISK: { res = expression_make_number_literal(left_val * right_val); break; }
-            case OPERATOR_SLASH:    { res = expression_make_number_literal(left_val / right_val); break; }
-            case OPERATOR_LT:       { res = expression_make_bool_literal(left_val < right_val); break; }
-            case OPERATOR_LTE:      { res = expression_make_bool_literal(left_val <= right_val); break; }
-            case OPERATOR_GT:       { res = expression_make_bool_literal(left_val > right_val); break; }
-            case OPERATOR_GTE:      { res = expression_make_bool_literal(left_val >= right_val); break; }
-            case OPERATOR_EQ:       { res = expression_make_bool_literal(APE_DBLEQ(left_val, right_val)); break; }
-            case OPERATOR_NOT_EQ:   { res = expression_make_bool_literal(!APE_DBLEQ(left_val, right_val)); break; }
-            case OPERATOR_MODULUS:  { res = expression_make_number_literal(fmod(left_val, right_val)); break; }
-            case OPERATOR_BIT_AND:  { res = expression_make_number_literal((double)(left_val_int & right_val_int)); break; }
-            case OPERATOR_BIT_OR:   { res = expression_make_number_literal((double)(left_val_int | right_val_int)); break; }
-            case OPERATOR_BIT_XOR:  { res = expression_make_number_literal((double)(left_val_int ^ right_val_int)); break; }
-            case OPERATOR_LSHIFT:   { res = expression_make_number_literal((double)(left_val_int << right_val_int)); break; }
-            case OPERATOR_RSHIFT:   { res = expression_make_number_literal((double)(left_val_int >> right_val_int)); break; }
+            case OPERATOR_PLUS:     { res = expression_make_number_literal(alloc, left_val + right_val); break; }
+            case OPERATOR_MINUS:    { res = expression_make_number_literal(alloc, left_val - right_val); break; }
+            case OPERATOR_ASTERISK: { res = expression_make_number_literal(alloc, left_val * right_val); break; }
+            case OPERATOR_SLASH:    { res = expression_make_number_literal(alloc, left_val / right_val); break; }
+            case OPERATOR_LT:       { res = expression_make_bool_literal(alloc, left_val < right_val); break; }
+            case OPERATOR_LTE:      { res = expression_make_bool_literal(alloc, left_val <= right_val); break; }
+            case OPERATOR_GT:       { res = expression_make_bool_literal(alloc, left_val > right_val); break; }
+            case OPERATOR_GTE:      { res = expression_make_bool_literal(alloc, left_val >= right_val); break; }
+            case OPERATOR_EQ:       { res = expression_make_bool_literal(alloc, APE_DBLEQ(left_val, right_val)); break; }
+            case OPERATOR_NOT_EQ:   { res = expression_make_bool_literal(alloc, !APE_DBLEQ(left_val, right_val)); break; }
+            case OPERATOR_MODULUS:  { res = expression_make_number_literal(alloc, fmod(left_val, right_val)); break; }
+            case OPERATOR_BIT_AND:  { res = expression_make_number_literal(alloc, (double)(left_val_int & right_val_int)); break; }
+            case OPERATOR_BIT_OR:   { res = expression_make_number_literal(alloc, (double)(left_val_int | right_val_int)); break; }
+            case OPERATOR_BIT_XOR:  { res = expression_make_number_literal(alloc, (double)(left_val_int ^ right_val_int)); break; }
+            case OPERATOR_LSHIFT:   { res = expression_make_number_literal(alloc, (double)(left_val_int << right_val_int)); break; }
+            case OPERATOR_RSHIFT:   { res = expression_make_number_literal(alloc, (double)(left_val_int >> right_val_int)); break; }
             default: {
                 break;
             }
@@ -6330,8 +6435,8 @@ static expression_t* optimise_infix_expression(const expression_t* expr) {
     } else if (expr->infix.op == OPERATOR_PLUS && left_is_string && right_is_string) {
         const char* left_val = left->string_literal;
         const char* right_val = right->string_literal;
-        char *res_str = ape_stringf("%s%s", left_val, right_val);
-        res = expression_make_string_literal(res_str);
+        char *res_str = ape_stringf(alloc, "%s%s", left_val, right_val);
+        res = expression_make_string_literal(alloc, res_str);
     }
 
     expression_destroy(left_optimised);
@@ -6344,17 +6449,17 @@ static expression_t* optimise_infix_expression(const expression_t* expr) {
     return res;
 }
 
-expression_t* optimise_prefix_expression(const expression_t* expr) {
-    const expression_t *right = expr->prefix.right;
+expression_t* optimise_prefix_expression(expression_t* expr) {
+    expression_t *right = expr->prefix.right;
     expression_t *right_optimised = optimise_expression(right);
     if (right_optimised) {
         right = right_optimised;
     }
     expression_t *res = NULL;
     if (expr->prefix.op == OPERATOR_MINUS && right->type == EXPRESSION_NUMBER_LITERAL) {
-        res = expression_make_number_literal(-right->number_literal);
+        res = expression_make_number_literal(expr->alloc, -right->number_literal);
     } else if (expr->prefix.op == OPERATOR_BANG && right->type == EXPRESSION_BOOL_LITERAL) {
-        res = expression_make_bool_literal(!right->bool_literal);
+        res = expression_make_bool_literal(expr->alloc, !right->bool_literal);
     }
     expression_destroy(right_optimised);
     if (res) {
@@ -6384,7 +6489,7 @@ static bool compile_code(compiler_t *comp, const char *code);
 static bool compile_statements(compiler_t *comp, ptrarray(statement_t) *statements);
 static bool import_module(compiler_t *comp, const statement_t *import_stmt);
 static bool compile_statement(compiler_t *comp, const statement_t *stmt);
-static bool compile_expression(compiler_t *comp, const expression_t *expr);
+static bool compile_expression(compiler_t *comp, expression_t *expr);
 static bool compile_code_block(compiler_t *comp, const code_block_t *block);
 static int  add_constant(compiler_t *comp, object_t obj);
 static void change_uint16_operand(compiler_t *comp, int ip, uint16_t operand);
@@ -6411,11 +6516,11 @@ static void pop_file_scope(compiler_t *comp);
 static void set_compilation_scope(compiler_t *comp, compilation_scope_t *scope);
 
 static module_t* get_current_module(compiler_t *comp);
-static module_t* module_make(const char *name);
+static module_t* module_make(allocator_t *alloc, const char *name);
 static void module_destroy(module_t *module);
 static void module_add_symbol(module_t *module, const symbol_t *symbol);
 
-static compiled_file_t* compiled_file_make(const char *path);
+static compiled_file_t* compiled_file_make(allocator_t *alloc, const char *path);
 static void compiled_file_destroy(compiled_file_t *file);
 
 static const char* get_module_name(const char *path);
@@ -6423,20 +6528,21 @@ static symbol_t* define_symbol(compiler_t *comp, src_pos_t pos, const char *name
 
 static bool is_comparison(operator_t op);
 
-compiler_t *compiler_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors) {
-    compiler_t *comp = ape_malloc(sizeof(compiler_t));
+compiler_t *compiler_make(allocator_t *alloc, const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors) {
+    compiler_t *comp = allocator_malloc(alloc, sizeof(compiler_t));
     memset(comp, 0, sizeof(compiler_t));
     APE_ASSERT(config);
+    comp->alloc = alloc;
     comp->config = config;
     comp->mem = mem;
-    comp->file_scopes = ptrarray_make();
-    comp->constants = array_make(object_t);
+    comp->file_scopes = ptrarray_make(alloc);
+    comp->constants = array_make(alloc, object_t);
     comp->errors = errors;
-    comp->break_ip_stack = array_make(int);
-    comp->continue_ip_stack = array_make(int);
-    comp->src_positions_stack = array_make(src_pos_t);
-    comp->modules = dict_make();
-    comp->files = ptrarray_make();
+    comp->break_ip_stack = array_make(alloc, int);
+    comp->continue_ip_stack = array_make(alloc, int);
+    comp->src_positions_stack = array_make(alloc, src_pos_t);
+    comp->modules = dict_make(alloc);
+    comp->files = ptrarray_make(alloc);
     compiler_push_compilation_scope(comp);
     push_file_scope(comp, "none", NULL);
     return comp;
@@ -6459,7 +6565,7 @@ void compiler_destroy(compiler_t *comp) {
     ptrarray_destroy(comp->file_scopes);
     ptrarray_destroy_with_items(comp->files, compiled_file_destroy);
     dict_destroy_with_items(comp->modules, module_destroy);
-    ape_free(comp);
+    allocator_free(comp->alloc, comp);
 }
 
 compilation_result_t* compiler_compile(compiler_t *comp, const char *code) {
@@ -6473,6 +6579,9 @@ compilation_result_t* compiler_compile(compiler_t *comp, const char *code) {
     array_clear(compilation_scope->src_positions);
 
     symbol_table_t *global_table_copy = symbol_table_copy(compiler_get_symbol_table(comp));
+    if (!global_table_copy) {
+        return NULL;
+    }
 
     bool ok = compile_code(comp, code);
 
@@ -6499,26 +6608,26 @@ compilation_result_t* compiler_compile(compiler_t *comp, const char *code) {
 
 compilation_result_t* compiler_compile_file(compiler_t *comp, const char *path) {
     if (!comp->config->fileio.read_file.read_file) {
-        error_t *err = error_make(ERROR_COMPILATION, src_pos_invalid, "File read function not configured");
+        error_t *err = error_make(comp->alloc, ERROR_COMPILATION, src_pos_invalid, "File read function not configured");
         ptrarray_add(comp->errors, err);
         return NULL;
     }
 
     char *code = comp->config->fileio.read_file.read_file(comp->config->fileio.read_file.context, path);
     if (!code) {
-        error_t *err = error_makef(ERROR_COMPILATION, src_pos_invalid, "Reading file \"%s\" failed", path);
+        error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, src_pos_invalid, "Reading file \"%s\" failed", path);
         ptrarray_add(comp->errors, err);
         return NULL;
     }
 
-    compiled_file_t *file = compiled_file_make(path);
+    compiled_file_t *file = compiled_file_make(comp->alloc, path);
     ptrarray_add(comp->files, file);
 
     APE_ASSERT(ptrarray_count(comp->file_scopes) == 1);
     file_scope_t *file_scope = ptrarray_top(comp->file_scopes);
     if (!file_scope) {
         APE_ASSERT(false);
-        ape_free(code);
+        allocator_free(comp->alloc, code);
         return NULL;
     }
     compiled_file_t *prev_file = file_scope->file;
@@ -6527,7 +6636,7 @@ compilation_result_t* compiler_compile_file(compiler_t *comp, const char *path) 
     compilation_result_t *res = compiler_compile(comp, code);
     
     file_scope->file = prev_file;
-    ape_free(code);
+    allocator_free(comp->alloc, code);
     return res;
 }
 
@@ -6537,7 +6646,7 @@ compilation_scope_t* compiler_get_compilation_scope(compiler_t *comp) {
 
 void compiler_push_compilation_scope(compiler_t *comp) {
     compilation_scope_t *current_scope = compiler_get_compilation_scope(comp);
-    compilation_scope_t *new_scope = compilation_scope_make(current_scope);
+    compilation_scope_t *new_scope = compilation_scope_make(comp->alloc, current_scope);
     set_compilation_scope(comp, new_scope);
 }
 
@@ -6555,7 +6664,7 @@ void compiler_push_symbol_table(compiler_t *comp) {
         return;
     }
     symbol_table_t *current_table = file_scope->symbol_table;
-    file_scope->symbol_table = symbol_table_make(current_table);
+    file_scope->symbol_table = symbol_table_make(comp->alloc, current_table);
 }
 
 void compiler_pop_symbol_table(compiler_t *comp) {
@@ -6642,26 +6751,26 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
     for (int i = 0; i < ptrarray_count(file_scope->loaded_module_names); i++) {
         const char *loaded_name = ptrarray_get(file_scope->loaded_module_names, i);
         if (kg_streq(loaded_name, module_name)) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Module \"%s\" was already imported", module_name);
+            error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, import_stmt->pos, "Module \"%s\" was already imported", module_name);
             ptrarray_add(comp->errors, err);
             result = false;
             goto end;
         }
     }
 
-    strbuf_t *filepath_buf = strbuf_make();
+    strbuf_t *filepath_buf = strbuf_make(comp->alloc);
     if (kg_is_path_absolute(module_path)) {
         strbuf_appendf(filepath_buf, "%s.bn", module_path);
     } else {
         strbuf_appendf(filepath_buf, "%s%s.bn", file_scope->file->dir_path, module_path);
     }
     const char *filepath_non_canonicalised = strbuf_get_string(filepath_buf);
-    filepath = kg_canonicalise_path(filepath_non_canonicalised);
+    filepath = kg_canonicalise_path(comp->alloc, filepath_non_canonicalised);
     strbuf_destroy(filepath_buf);
 
     symbol_table_t *symbol_table = compiler_get_symbol_table(comp);
     if (symbol_table->outer != NULL || ptrarray_count(symbol_table->block_scopes) > 1) {
-        error_t *err = error_make(ERROR_COMPILATION, import_stmt->pos, "Modules can only be imported in global scope");
+        error_t *err = error_make(comp->alloc, ERROR_COMPILATION, import_stmt->pos, "Modules can only be imported in global scope");
         ptrarray_add(comp->errors, err);
         result = false;
         goto end;
@@ -6670,7 +6779,7 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
     for (int i = 0; i < ptrarray_count(comp->file_scopes); i++) {
         file_scope_t *fs = ptrarray_get(comp->file_scopes, i);
         if (APE_STREQ(fs->file->path, filepath)) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Cyclic reference of file \"%s\"", filepath);
+            error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, import_stmt->pos, "Cyclic reference of file \"%s\"", filepath);
             ptrarray_add(comp->errors, err);
             result = false;
             goto end;
@@ -6680,7 +6789,7 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
     module_t *module = dict_get(comp->modules, filepath);
     if (!module) {
         if (!comp->config->fileio.read_file.read_file) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Cannot import module \"%s\", file read function not configured", filepath);
+            error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, import_stmt->pos, "Cannot import module \"%s\", file read function not configured", filepath);
             ptrarray_add(comp->errors, err);
             result = false;
             goto end;
@@ -6688,17 +6797,17 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
 
         char *code = comp->config->fileio.read_file.read_file(comp->config->fileio.read_file.context, filepath);
         if (!code) {
-            error_t *err = error_makef(ERROR_COMPILATION, import_stmt->pos, "Reading module file \"%s\" failed", filepath);
+            error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, import_stmt->pos, "Reading module file \"%s\" failed", filepath);
             ptrarray_add(comp->errors, err);
             result = false;
             goto end;
         }
 
-        module = module_make(module_name);
+        module = module_make(comp->alloc, module_name);
         push_file_scope(comp, filepath, module);
         bool ok = compile_code(comp, code);
         pop_file_scope(comp);
-        ape_free(code);
+        allocator_free(comp->alloc, code);
 
         if (!ok) {
             module_destroy(module);
@@ -6714,12 +6823,12 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) {
         symbol_table_add_module_symbol(symbol_table, symbol);
     }
 
-    ptrarray_add(file_scope->loaded_module_names, ape_strdup(module_name));
+    ptrarray_add(file_scope->loaded_module_names, ape_strdup(comp->alloc, module_name));
     
     result = true;
 
 end:
-    ape_free(filepath);
+    allocator_free(comp->alloc, filepath);
     return result;
 }
 
@@ -6762,7 +6871,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
         case STATEMENT_IF: {
             const if_statement_t *if_stmt = &stmt->if_statement;
 
-            array(int) *jump_to_end_ips = array_make(int);
+            array(int) *jump_to_end_ips = array_make(comp->alloc, int);
             for (int i = 0; i < ptrarray_count(if_stmt->cases); i++) {
                 if_case_t *if_case = ptrarray_get(if_stmt->cases, i);
 
@@ -6811,7 +6920,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
         }
         case STATEMENT_RETURN_VALUE: {
             if (compilation_scope->outer == NULL) {
-                error_t *err = error_makef(ERROR_COMPILATION, stmt->pos, "Nothing to return from");
+                error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, stmt->pos, "Nothing to return from");
                 ptrarray_add(comp->errors, err);
                 return false;
             }
@@ -6859,7 +6968,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
         case STATEMENT_BREAK: {
             int break_ip = get_break_ip(comp);
             if (break_ip < 0) {
-                error_t *err = error_makef(ERROR_COMPILATION, stmt->pos, "Nothing to break from.");
+                error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, stmt->pos, "Nothing to break from.");
                 ptrarray_add(comp->errors, err);
                 return false;
             }
@@ -6869,7 +6978,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
         case STATEMENT_CONTINUE: {
             int continue_ip = get_continue_ip(comp);
             if (continue_ip < 0) {
-                error_t *err = error_makef(ERROR_COMPILATION, stmt->pos, "Nothing to continue from.");
+                error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, stmt->pos, "Nothing to continue from.");
                 ptrarray_add(comp->errors, err);
                 return false;
             }
@@ -6893,7 +7002,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
             if (foreach->source->type == EXPRESSION_IDENT) {
                 source_symbol = symbol_table_resolve(symbol_table, foreach->source->ident->value);
                 if (!source_symbol) {
-                    error_t *err = error_makef(ERROR_COMPILATION, foreach->source->pos,
+                    error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, foreach->source->pos,
                                               "Symbol \"%s\" could not be resolved", foreach->source->ident->value);
                     ptrarray_add(comp->errors, err);
                     return false;
@@ -7042,14 +7151,14 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
             const recover_statement_t *recover = &stmt->recover;
 
             if (symbol_table_is_global_scope(symbol_table)) {
-                error_t *err = error_make(ERROR_COMPILATION, stmt->pos,
+                error_t *err = error_make(comp->alloc, ERROR_COMPILATION, stmt->pos,
                                           "Recover statement cannot be defined in global scope");
                 ptrarray_add(comp->errors, err);
                 return false;
             }
 
             if (!symbol_table_is_top_block_scope(symbol_table)) {
-                error_t *err = error_make(ERROR_COMPILATION, stmt->pos,
+                error_t *err = error_make(comp->alloc, ERROR_COMPILATION, stmt->pos,
                                           "Recover statement cannot be defined within other statements");
                 ptrarray_add(comp->errors, err);
                 return false;
@@ -7075,7 +7184,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
             }
 
             if (!last_opcode_is(comp, OPCODE_RETURN) && !last_opcode_is(comp, OPCODE_RETURN_VALUE)) {
-                error_t *err = error_make(ERROR_COMPILATION, stmt->pos,
+                error_t *err = error_make(comp->alloc, ERROR_COMPILATION, stmt->pos,
                                           "Recover body must end with a return statement");
                 ptrarray_add(comp->errors, err);
                 return false;
@@ -7097,7 +7206,7 @@ static bool compile_statement(compiler_t *comp, const statement_t *stmt) {
     return true;
 }
 
-static bool compile_expression(compiler_t *comp, const expression_t *expr) {
+static bool compile_expression(compiler_t *comp, expression_t *expr) {
     bool ok = false;
 
     expression_t *expr_optimised = optimise_expression(expr);
@@ -7134,14 +7243,14 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 case OPERATOR_LSHIFT:   op = OPCODE_LSHIFT; break;
                 case OPERATOR_RSHIFT:   op = OPCODE_RSHIFT; break;
                 default: {
-                    error_t *err = error_makef(ERROR_COMPILATION, expr->pos, "Unknown infix operator");
+                    error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, expr->pos, "Unknown infix operator");
                     ptrarray_add(comp->errors, err);
                     goto error;
                 }
             }
 
-            const expression_t *left = rearrange ? expr->infix.right : expr->infix.left;
-            const expression_t *right = rearrange ? expr->infix.left : expr->infix.right;
+            expression_t *left = rearrange ? expr->infix.right : expr->infix.left;
+            expression_t *right = rearrange ? expr->infix.left : expr->infix.right;
 
             ok = compile_expression(comp, left);
             if (!ok) {
@@ -7195,8 +7304,8 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             int len = ptrarray_count(map->keys);
             compiler_emit(comp, OPCODE_MAP_START, 1, (uint64_t[]){len});
             for (int i = 0; i < len; i++) {
-                const expression_t *key = ptrarray_get(map->keys, i);
-                const expression_t *val = ptrarray_get(map->values, i);
+                expression_t *key = ptrarray_get(map->keys, i);
+                expression_t *val = ptrarray_get(map->values, i);
 
                 ok = compile_expression(comp, key);
                 if (!ok) {
@@ -7221,7 +7330,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 case OPERATOR_MINUS: op = OPCODE_MINUS; break;
                 case OPERATOR_BANG: op = OPCODE_BANG; break;
                 default: {
-                    error_t *err = error_makef(ERROR_COMPILATION, expr->pos, "Unknown prefix operator.");
+                    error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, expr->pos, "Unknown prefix operator.");
                     ptrarray_add(comp->errors, err);
                     goto error;
                 }
@@ -7233,7 +7342,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             const ident_t *ident = expr->ident;
             symbol_t *symbol = symbol_table_resolve(symbol_table, ident->value);
             if (!symbol) {
-                error_t *err = error_makef(ERROR_COMPILATION, ident->pos,
+                error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, ident->pos,
                                            "Symbol \"%s\" could not be resolved", ident->value);
                 ptrarray_add(comp->errors, err);
                 goto error;
@@ -7265,7 +7374,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             if (fn->name) {
                 symbol_t *fn_symbol = symbol_table_define_function_name(symbol_table, fn->name, false);
                 if (!fn_symbol) {
-                    error_t *err = error_makef(ERROR_COMPILATION, expr->pos,
+                    error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, expr->pos,
                                                "Cannot define symbol \"%s\"", fn->name);
                     ptrarray_add(comp->errors, err);
                     goto error;
@@ -7274,7 +7383,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
 
             symbol_t *this_symbol = symbol_table_define_this(symbol_table);
             if (!this_symbol) {
-                error_t *err = error_make(ERROR_COMPILATION, expr->pos, "Cannot define \"this\" symbol");
+                error_t *err = error_make(comp->alloc, ERROR_COMPILATION, expr->pos, "Cannot define \"this\" symbol");
                 ptrarray_add(comp->errors, err);
                 goto error;
             }
@@ -7329,7 +7438,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
             }
 
             for (int i = 0; i < ptrarray_count(expr->call_expr.args); i++) {
-                const expression_t *arg_expr = ptrarray_get(expr->call_expr.args, i);
+                expression_t *arg_expr = ptrarray_get(expr->call_expr.args, i);
                 ok = compile_expression(comp, arg_expr);
                 if (!ok) {
                     goto error;
@@ -7342,7 +7451,7 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
         case EXPRESSION_ASSIGN: {
             const assign_expression_t *assign = &expr->assign;
             if (assign->dest->type != EXPRESSION_IDENT && assign->dest->type != EXPRESSION_INDEX) {
-                error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
+                error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, assign->dest->pos,
                                           "Expression is not assignable.");
                 ptrarray_add(comp->errors, err);
                 goto error;
@@ -7360,13 +7469,13 @@ static bool compile_expression(compiler_t *comp, const expression_t *expr) {
                 const ident_t *ident = assign->dest->ident;
                 symbol_t *symbol = symbol_table_resolve(symbol_table, ident->value);
                 if (!symbol) {
-                    error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
+                    error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, assign->dest->pos,
                                               "Symbol \"%s\" could not be resolved", ident->value);
                     ptrarray_add(comp->errors, err);
                     goto error;
                 }
                 if (!symbol->assignable) {
-                    error_t *err = error_makef(ERROR_COMPILATION, assign->dest->pos,
+                    error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, assign->dest->pos,
                                               "Symbol \"%s\" is not assignable", ident->value);
                     ptrarray_add(comp->errors, err);
                     goto error;
@@ -7581,14 +7690,14 @@ static void push_file_scope(compiler_t *comp, const char *filepath, module_t *mo
     if (ptrarray_count(comp->file_scopes) > 0) {
         prev_st = compiler_get_symbol_table(comp);
     }
-    file_scope_t *file_scope = ape_malloc(sizeof(file_scope_t));
+    file_scope_t *file_scope = allocator_malloc(comp->alloc, sizeof(file_scope_t));
     memset(file_scope, 0, sizeof(file_scope_t));
-    file_scope->parser = parser_make(comp->config, comp->errors);
+    file_scope->parser = parser_make(comp->alloc, comp->config, comp->errors);
     file_scope->symbol_table = NULL;
     file_scope->module = module;
-    file_scope->file = compiled_file_make(filepath);
+    file_scope->file = compiled_file_make(comp->alloc, filepath);
     ptrarray_add(comp->files, file_scope->file);
-    file_scope->loaded_module_names = ptrarray_make();
+    file_scope->loaded_module_names = ptrarray_make(comp->alloc);
 
     ptrarray_push(comp->file_scopes, file_scope);
     compiler_push_symbol_table(comp);
@@ -7614,12 +7723,17 @@ static void pop_file_scope(compiler_t *comp) {
     while (compiler_get_symbol_table(comp)) {
         compiler_pop_symbol_table(comp);
     }
-    ptrarray_destroy_with_items(scope->loaded_module_names, ape_free);
+    for (int i = 0; i < ptrarray_count(scope->loaded_module_names); i++) {
+        void *name = ptrarray_get(scope->loaded_module_names, i);
+        allocator_free(comp->alloc, name);
+    }
+    ptrarray_destroy(scope->loaded_module_names);
     scope->loaded_module_names = NULL;
     
     parser_destroy(scope->parser);
 
-    ape_free(scope);
+    allocator_free(comp->alloc, scope);
+
     ptrarray_pop(comp->file_scopes);
 
     if (ptrarray_count(comp->file_scopes) > 0) {
@@ -7638,38 +7752,40 @@ static module_t* get_current_module(compiler_t *comp) {
     return scope->module;
 }
 
-static module_t* module_make(const char *name) {
-    module_t *module = ape_malloc(sizeof(module_t));
-    module->name = ape_strdup(name);
-    module->symbols = ptrarray_make();
+static module_t* module_make(allocator_t *alloc, const char *name) {
+    module_t *module = allocator_malloc(alloc, sizeof(module_t));
+    module->alloc = alloc;
+    module->name = ape_strdup(alloc, name);
+    module->symbols = ptrarray_make(alloc);
     return module;
 }
 
 static void module_destroy(module_t *module) {
-    ape_free(module->name);
+    allocator_free(module->alloc, module->name);
     ptrarray_destroy_with_items(module->symbols, symbol_destroy);
-    ape_free(module);
+    allocator_free(module->alloc, module);
 }
 
 static void module_add_symbol(module_t *module, const symbol_t *symbol) {
-    strbuf_t *name_buf = strbuf_make();
+    strbuf_t *name_buf = strbuf_make(module->alloc);
     strbuf_appendf(name_buf, "%s::%s", module->name, symbol->name);
-    symbol_t *module_symbol = symbol_make(strbuf_get_string(name_buf), SYMBOL_GLOBAL, symbol->index, false);
+    symbol_t *module_symbol = symbol_make(module->alloc, strbuf_get_string(name_buf), SYMBOL_GLOBAL, symbol->index, false);
     strbuf_destroy(name_buf);
     ptrarray_add(module->symbols, module_symbol);
 }
 
-static compiled_file_t* compiled_file_make(const char *path) {
-    compiled_file_t *file = ape_malloc(sizeof(compiled_file_t));
+static compiled_file_t* compiled_file_make(allocator_t *alloc, const char *path) {
+    compiled_file_t *file = allocator_malloc(alloc, sizeof(compiled_file_t));
+    file->alloc = alloc;
     const char *last_slash_pos = strrchr(path, '/');
     if (last_slash_pos) {
         size_t len = last_slash_pos - path + 1;
-        file->dir_path = ape_strndup(path, len);
+        file->dir_path = ape_strndup(alloc, path, len);
     } else {
-        file->dir_path = ape_strdup("");
+        file->dir_path = ape_strdup(alloc, "");
     }
-    file->path = ape_strdup(path);
-    file->lines = ptrarray_make();
+    file->path = ape_strdup(alloc, path);
+    file->lines = ptrarray_make(alloc);
     return file;
 }
 
@@ -7677,10 +7793,14 @@ static void compiled_file_destroy(compiled_file_t *file) {
     if (!file) {
         return;
     }
-    ptrarray_destroy_with_items(file->lines, ape_free);
-    ape_free(file->dir_path);
-    ape_free(file->path);
-    ape_free(file);
+    for (int i = 0; i < ptrarray_count(file->lines); i++) {
+        void *item = ptrarray_get(file->lines, i);
+        allocator_free(file->alloc, item);
+    }
+    ptrarray_destroy(file->lines);
+    allocator_free(file->alloc, file->dir_path);
+    allocator_free(file->alloc, file->path);
+    allocator_free(file->alloc, file);
 }
 
 static const char* get_module_name(const char *path) {
@@ -7696,7 +7816,7 @@ static symbol_t* define_symbol(compiler_t *comp, src_pos_t pos, const char *name
     if (!can_shadow && !symbol_table_is_top_global_scope(symbol_table)) {
         symbol_t *current_symbol = symbol_table_resolve(symbol_table, name);
         if (current_symbol) {
-            error_t *err = error_makef(ERROR_COMPILATION, pos, "Symbol \"%s\" is already defined", name);
+            error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, pos, "Symbol \"%s\" is already defined", name);
             ptrarray_add(comp->errors, err);
             return NULL;
         }
@@ -7704,7 +7824,7 @@ static symbol_t* define_symbol(compiler_t *comp, src_pos_t pos, const char *name
 
     symbol_t *symbol = symbol_table_define(symbol_table, name, assignable);
     if (!symbol) {
-        error_t *err = error_makef(ERROR_COMPILATION, pos, "Cannot define symbol \"%s\"", name);
+        error_t *err = error_makef(comp->alloc, ERROR_COMPILATION, pos, "Cannot define symbol \"%s\"", name);
         ptrarray_add(comp->errors, err);
         return false;
     }
@@ -7791,7 +7911,7 @@ object_t object_make_string(gcmem_t *mem, const char *string) {
         memcpy(obj->string.value_buf, string, len + 1);
         obj->string.is_allocated = false;
     } else {
-        obj->string.value_allocated = ape_strdup(string);
+        obj->string.value_allocated = ape_strdup(mem->alloc, string);
         obj->string.is_allocated = true;
     }
     obj->string.hash = object_hash_string(string);
@@ -7805,7 +7925,7 @@ object_t object_make_string_no_copy(gcmem_t *mem, char *string) {
         memcpy(obj->string.value_buf, string, len + 1);
         obj->string.is_allocated = false;
         obj->string.hash = object_hash_string(string);
-        ape_free(string);
+        allocator_free(mem->alloc, string);
         string = NULL;
     } else {
         obj->string.value_allocated = string;
@@ -7821,7 +7941,7 @@ object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *res = (char*)ape_malloc(to_write + 1);
+    char *res = (char*)allocator_malloc(mem->alloc, to_write + 1);
     int written = vsprintf(res, fmt, args);
     (void)written;
     APE_ASSERT(written == to_write);
@@ -7831,7 +7951,7 @@ object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) {
 
 object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn fn, void *data) {
     object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_NATIVE_FUNCTION);
-    obj->native_function.name = ape_strdup(name);
+    obj->native_function.name = ape_strdup(mem->alloc, name);
     obj->native_function.fn = fn;
     obj->native_function.data = data;
     return object_make_from_data(OBJECT_NATIVE_FUNCTION, obj);
@@ -7848,7 +7968,7 @@ object_t object_make_array_with_capacity(gcmem_t *mem, unsigned capacity) {
         return object_make_from_data(OBJECT_ARRAY, data);
     }
     data = gcmem_alloc_object_data(mem, OBJECT_ARRAY);
-    data->array = array_make_with_capacity(capacity, sizeof(object_t));
+    data->array = array_make_with_capacity(mem->alloc, capacity, sizeof(object_t));
     return object_make_from_data(OBJECT_ARRAY, data);
 }
 
@@ -7863,14 +7983,14 @@ object_t object_make_map_with_capacity(gcmem_t *mem, unsigned capacity) {
         return object_make_from_data(OBJECT_MAP, data);
     }
     data = gcmem_alloc_object_data(mem, OBJECT_MAP);
-    data->map = valdict_make_with_capacity(capacity, sizeof(object_t), sizeof(object_t));
+    data->map = valdict_make_with_capacity(mem->alloc, capacity, sizeof(object_t), sizeof(object_t));
     valdict_set_hash_function(data->map, (collections_hash_fn)object_hash);
     valdict_set_equals_function(data->map, (collections_equals_fn)object_equals_wrapped);
     return object_make_from_data(OBJECT_MAP, data);
 }
 
 object_t object_make_error(gcmem_t *mem, const char *error) {
-    return object_make_error_no_copy(mem, ape_strdup(error));
+    return object_make_error_no_copy(mem, ape_strdup(mem->alloc, error));
 }
 
 object_t object_make_error_no_copy(gcmem_t *mem, char *error) {
@@ -7886,7 +8006,7 @@ object_t object_make_errorf(gcmem_t *mem, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *res = (char*)ape_malloc(to_write + 1);
+    char *res = (char*)allocator_malloc(mem->alloc, to_write + 1);
     int written = vsprintf(res, fmt, args);
     (void)written;
     APE_ASSERT(written == to_write);
@@ -7900,7 +8020,7 @@ object_t object_make_function(gcmem_t *mem, const char *name, compilation_result
 
     object_data_t *data = gcmem_alloc_object_data(mem, OBJECT_FUNCTION);
     if (owns_data) {
-        data->function.name = name ? ape_strdup(name) : ape_strdup("anonymous");
+        data->function.name = name ? ape_strdup(mem->alloc, name) : ape_strdup(mem->alloc, "anonymous");
     } else {
         data->function.const_name = name ? name : "anonymous";
     }
@@ -7909,7 +8029,7 @@ object_t object_make_function(gcmem_t *mem, const char *name, compilation_result
     data->function.num_locals = num_locals;
     data->function.num_args = num_args;
     if (free_vals_count >= APE_ARRAY_LEN(data->function.free_vals_buf)) {
-        data->function.free_vals_allocated = ape_malloc(sizeof(object_t) * free_vals_count);
+        data->function.free_vals_allocated = allocator_malloc(mem->alloc, sizeof(object_t) * free_vals_count);
     }
     data->function.free_vals_count = free_vals_count;
     return object_make_from_data(OBJECT_FUNCTION, data);
@@ -7938,17 +8058,17 @@ void object_data_deinit(object_data_t *data) {
         }
         case OBJECT_STRING: {
             if (data->string.is_allocated) {
-                ape_free(data->string.value_allocated);
+                allocator_free(data->mem->alloc, data->string.value_allocated);
             }
             break;
         }
         case OBJECT_FUNCTION: {
             if (data->function.owns_data) {
-                ape_free(data->function.name);
+                allocator_free(data->mem->alloc, data->function.name);
                 compilation_result_destroy(data->function.comp_result);
             }
             if (freevals_are_allocated(&data->function)) {
-                ape_free(data->function.free_vals_allocated);
+                allocator_free(data->mem->alloc, data->function.free_vals_allocated);
             }
             break;
         }
@@ -7961,7 +8081,7 @@ void object_data_deinit(object_data_t *data) {
             break;
         }
         case OBJECT_NATIVE_FUNCTION: {
-            ape_free(data->native_function.name);
+            allocator_free(data->mem->alloc, data->native_function.name);
             break;
         }
         case OBJECT_EXTERNAL: {
@@ -7971,7 +8091,7 @@ void object_data_deinit(object_data_t *data) {
             break;
         }
         case OBJECT_ERROR: {
-            ape_free(data->error.message);
+            allocator_free(data->mem->alloc, data->error.message);
             traceback_destroy(data->error.traceback);
             break;
         }
@@ -8110,11 +8230,11 @@ const char *object_get_type_name(const object_type_t type) {
     return "NONE";
 }
 
-char* object_get_type_union_name(const object_type_t type) {
+char* object_get_type_union_name(allocator_t *alloc, const object_type_t type) {
     if (type == OBJECT_ANY || type == OBJECT_NONE || type == OBJECT_FREED) {
-        return ape_strdup(object_get_type_name(type));
+        return ape_strdup(alloc, object_get_type_name(type));
     }
-    strbuf_t *res = strbuf_make();
+    strbuf_t *res = strbuf_make(alloc);
     bool in_between = false;
 #define CHECK_TYPE(t) \
     do {\
@@ -8141,15 +8261,15 @@ char* object_get_type_union_name(const object_type_t type) {
     return strbuf_get_string_and_destroy(res);
 }
 
-char* object_serialize(object_t object) {
-    strbuf_t *buf = strbuf_make();
+char* object_serialize(allocator_t *alloc, object_t object) {
+    strbuf_t *buf = strbuf_make(alloc);
     object_to_string(object, buf, true);
     char *string = strbuf_get_string_and_destroy(buf);
     return string;
 }
 
 object_t object_deep_copy(gcmem_t *mem, object_t obj) {
-    valdict(object_t, object_t) *copies = valdict_make(object_t, object_t);
+    valdict(object_t, object_t) *copies = valdict_make(mem->alloc, object_t, object_t);
     object_t res = object_deep_copy_internal(mem, obj, copies);
     valdict_destroy(copies);
     return res;
@@ -8578,17 +8698,17 @@ static object_t object_deep_copy_internal(gcmem_t *mem, object_t obj, valdict(ob
         }
         case OBJECT_FUNCTION: {
             function_t *function = object_get_function(obj);
-            uint8_t *bytecode_copy = ape_malloc(sizeof(uint8_t) * function->comp_result->count);
+            uint8_t *bytecode_copy = allocator_malloc(mem->alloc, sizeof(uint8_t) * function->comp_result->count);
             memcpy(bytecode_copy, function->comp_result->bytecode, sizeof(uint8_t) * function->comp_result->count);
-            src_pos_t *src_positions_copy = ape_malloc(sizeof(src_pos_t) * function->comp_result->count);
+            src_pos_t *src_positions_copy = allocator_malloc(mem->alloc, sizeof(src_pos_t) * function->comp_result->count);
             memcpy(src_positions_copy, function->comp_result->src_positions, sizeof(src_pos_t) * function->comp_result->count);
-            compilation_result_t *comp_res_copy = compilation_result_make(bytecode_copy, src_positions_copy, function->comp_result->count);
+            compilation_result_t *comp_res_copy = compilation_result_make(mem->alloc, bytecode_copy, src_positions_copy, function->comp_result->count);
             copy = object_make_function(mem, object_get_function_name(obj), comp_res_copy, true,
                                         function->num_locals, function->num_args, 0);
             valdict_set(copies, &obj, &copy);
             function_t *function_copy = object_get_function(copy);
             if (freevals_are_allocated(function)) {
-                function_copy->free_vals_allocated = ape_malloc(sizeof(object_t) * function->free_vals_count);
+                function_copy->free_vals_allocated = allocator_malloc(mem->alloc, sizeof(object_t) * function->free_vals_count);
             }
             function_copy->free_vals_count = function->free_vals_count;
             for (int i = 0; i < function->free_vals_count; i++) {
@@ -8713,35 +8833,16 @@ static bool freevals_are_allocated(function_t *fun) {
 #include "object.h"
 #endif
 
-#define GCMEM_POOL_SIZE 2048
-#define GCMEM_POOLS_NUM 2
-
-typedef struct object_data_pool {
-    object_data_t *data[GCMEM_POOL_SIZE];
-    int count;
-} object_data_pool_t;
-
-typedef struct gcmem {
-    int allocations_since_sweep;
-
-    ptrarray(object_data_t) *objects;
-    ptrarray(object_data_t) *objects_back;
-
-    array(object_t) *objects_not_gced;
-
-    object_data_pool_t data_only_pool;
-    object_data_pool_t pools[GCMEM_POOLS_NUM];
-} gcmem_t;
-
 static object_data_pool_t* get_pool_for_type(gcmem_t *mem, object_type_t type);
 static bool can_data_be_put_in_pool(gcmem_t *mem, object_data_t *data);
 
-gcmem_t *gcmem_make() {
-    gcmem_t *mem = ape_malloc(sizeof(gcmem_t));
+gcmem_t *gcmem_make(allocator_t *alloc) {
+    gcmem_t *mem = allocator_malloc(alloc, sizeof(gcmem_t));
     memset(mem, 0, sizeof(gcmem_t));
-    mem->objects = ptrarray_make();
-    mem->objects_back = ptrarray_make();
-    mem->objects_not_gced = array_make(object_t);
+    mem->alloc = alloc;
+    mem->objects = ptrarray_make(alloc);
+    mem->objects_back = ptrarray_make(alloc);
+    mem->objects_not_gced = array_make(alloc, object_t);
     mem->allocations_since_sweep = 0;
     mem->data_only_pool.count = 0;
 
@@ -8759,31 +8860,31 @@ void gcmem_destroy(gcmem_t *mem) {
         return;
     }
 
+    array_destroy(mem->objects_not_gced);
+    ptrarray_destroy(mem->objects_back);
+
     for (int i = 0; i < ptrarray_count(mem->objects); i++) {
         object_data_t *obj = ptrarray_get(mem->objects, i);
         object_data_deinit(obj);
-        ape_free(obj);
+        allocator_free(mem->alloc, obj);
     }
     ptrarray_destroy(mem->objects);
-    ptrarray_destroy(mem->objects_back);
-    array_destroy(mem->objects_not_gced);
 
     for (int i = 0; i < GCMEM_POOLS_NUM; i++) {
         object_data_pool_t *pool = &mem->pools[i];
         for (int j = 0; j < pool->count; j++) {
             object_data_t *data = pool->data[j];
             object_data_deinit(data);
-            ape_free(data);
+            allocator_free(mem->alloc, data);
         }
         memset(pool, 0, sizeof(object_data_pool_t));
     }
 
     for (int i = 0; i < mem->data_only_pool.count; i++) {
-        ape_free(mem->data_only_pool.data[i]);
+        allocator_free(mem->alloc, mem->data_only_pool.data[i]);
     }
 
-    memset(mem, 0, sizeof(gcmem_t));
-    ape_free(mem);
+    allocator_free(mem->alloc, mem);
 }
 
 object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type) {
@@ -8793,7 +8894,7 @@ object_data_t* gcmem_alloc_object_data(gcmem_t *mem, object_type_t type) {
         data = mem->data_only_pool.data[mem->data_only_pool.count - 1];
         mem->data_only_pool.count--;
     } else {
-        data = ape_malloc(sizeof(object_data_t));
+        data = allocator_malloc(mem->alloc, sizeof(object_data_t));
     }
 
     memset(data, 0, sizeof(object_data_t));
@@ -8911,7 +9012,7 @@ void gc_sweep(gcmem_t *mem) {
                     mem->data_only_pool.data[mem->data_only_pool.count] = data;
                     mem->data_only_pool.count++;
                 } else {
-                    ape_free(data);
+                    allocator_free(mem->alloc, data);
                 }
             }
         }
@@ -9204,7 +9305,7 @@ static object_t reverse_fn(vm_t *vm, void *data, int argc, object_t *args) {
     } else if (type == OBJECT_STRING) {
         const char *str = object_get_string(arg);
         int len = (int)strlen(str);
-        char *res_buf = ape_malloc(len + 1);
+        char *res_buf = allocator_malloc(vm->alloc, len + 1);
         for (int i = 0; i < len; i++) {
             res_buf[len - i - 1] = str[i];
         }
@@ -9261,7 +9362,7 @@ static object_t println_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_null(); // todo: runtime error?
     }
 
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(vm->alloc);
     for (int i = 0; i < argc; i++) {
         object_t arg = args[i];
         object_to_string(arg, buf, false);
@@ -9280,7 +9381,7 @@ static object_t print_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_null(); // todo: runtime error?
     }
 
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(vm->alloc);
     for (int i = 0; i < argc; i++) {
         object_t arg = args[i];
         object_to_string(arg, buf, false);
@@ -9339,7 +9440,7 @@ static object_t to_str_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_null();
     }
     object_t arg = args[0];
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(vm->alloc);
     object_to_string(arg, buf, false);
     object_t res = object_make_string(vm->mem, strbuf_get_string(buf));
     strbuf_destroy(buf);
@@ -9366,7 +9467,7 @@ static object_t range_fn(vm_t *vm, void *data, int argc, object_t *args) {
         if (type != OBJECT_NUMBER) {
             const char *type_str = object_get_type_name(type);
             const char *expected_str = object_get_type_name(OBJECT_NUMBER);
-            error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
+            error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, src_pos_invalid,
                                        "Invalid argument %d passed to range, got %s instead of %s",
                                        i, type_str, expected_str);
             vm_set_runtime_error(vm, err);
@@ -9388,13 +9489,13 @@ static object_t range_fn(vm_t *vm, void *data, int argc, object_t *args) {
         end = (int)object_get_number(args[1]);
         step = (int)object_get_number(args[2]);
     } else {
-        error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid, "Invalid number of arguments passed to range, got %d", argc);
+        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, src_pos_invalid, "Invalid number of arguments passed to range, got %d", argc);
         vm_set_runtime_error(vm, err);
         return object_make_null();
     }
 
     if (step == 0) {
-        error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "range step cannot be 0");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, src_pos_invalid, "range step cannot be 0");
         vm_set_runtime_error(vm, err);
         return object_make_null();
     }
@@ -9463,7 +9564,7 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
     if (type == OBJECT_ARRAY) {
         if (item_type != OBJECT_ARRAY) {
             const char *item_type_str = object_get_type_name(item_type);
-            error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
+            error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, src_pos_invalid,
                                        "Invalid argument 2 passed to concat, got %s",
                                        item_type_str);
             vm_set_runtime_error(vm, err);
@@ -9482,7 +9583,7 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
         int len = (int)strlen(str);
         const char *arg_str = object_get_string(args[1]);
         int arg_str_len = (int)strlen(arg_str);
-        char *res_buf = ape_malloc(len + arg_str_len + 1);
+        char *res_buf = allocator_malloc(vm->alloc, len + arg_str_len + 1);
         for (int i = 0; i < len; i++) {
             res_buf[i] = str[i];
         }
@@ -9553,9 +9654,9 @@ static object_t crash_fn(vm_t *vm, void *data, int argc, object_t *args) {
     (void)data;
     error_t *err = NULL;
     if (argc == 1 && object_get_type(args[0]) == OBJECT_STRING) {
-        err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), object_get_string(args[0]));
+        err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), object_get_string(args[0]));
     } else {
-        err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "");
+        err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "");
     }
     vm_set_runtime_error(vm, err);
     return object_make_null();
@@ -9568,7 +9669,7 @@ static object_t assert_fn(vm_t *vm, void *data, int argc, object_t *args) {
     }
 
     if (!object_get_bool(args[0])) {
-        error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "assertion failed");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, src_pos_invalid, "assertion failed");
         vm_set_runtime_error(vm, err);
         return object_make_null();
     }
@@ -9598,7 +9699,7 @@ static object_t random_fn(vm_t *vm, void *data, int argc, object_t *args) {
         double min = object_get_number(args[0]);
         double max = object_get_number(args[1]);
         if (min >= max) {
-            error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "max is bigger than min");
+            error_t *err = error_make(vm->alloc, ERROR_RUNTIME, src_pos_invalid, "max is bigger than min");
             vm_set_runtime_error(vm, err);
             return object_make_null();
         }
@@ -9606,7 +9707,7 @@ static object_t random_fn(vm_t *vm, void *data, int argc, object_t *args) {
         res = min + (res * range);
         return object_make_number(res);
     } else {
-        error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "Invalid number or arguments");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, src_pos_invalid, "Invalid number or arguments");
         vm_set_runtime_error(vm, err);
         return object_make_null();
     }
@@ -9645,7 +9746,7 @@ static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args) {
         if (index >= len) {
             return object_make_string(vm->mem, "");
         }
-        char *res_str = ape_malloc(len - index + 1);
+        char *res_str = allocator_malloc(vm->alloc, len - index + 1);
         memset(res_str, 0, len - index + 1);
         for (int i = index; i < len; i++) {
             char c = str[i];
@@ -9654,7 +9755,7 @@ static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return object_make_string_no_copy(vm->mem, res_str);
     } else {
         const char *type_str = object_get_type_name(arg_type);
-        error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
+        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, src_pos_invalid,
                                    "Invalid argument 0 passed to slice, got %s instead", type_str);
         vm_set_runtime_error(vm, err);
         return object_make_null();
@@ -9843,7 +9944,7 @@ static object_t abs_fn(vm_t *vm, void *data, int argc, object_t *args) {
 static bool check_args(vm_t *vm, bool generate_error, int argc, object_t *args, int expected_argc, object_type_t *expected_types) {
     if (argc != expected_argc) {
         if (generate_error) {
-            error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
+            error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, src_pos_invalid,
                                        "Invalid number or arguments, got %d instead of %d",
                                        argc, expected_argc);
             vm_set_runtime_error(vm, err);
@@ -9858,11 +9959,11 @@ static bool check_args(vm_t *vm, bool generate_error, int argc, object_t *args, 
         if (!(type & expected_type)) {
             if (generate_error) {
                 const char *type_str = object_get_type_name(type);
-                char *expected_type_str = object_get_type_union_name(expected_type);
-                error_t *err = error_makef(ERROR_RUNTIME, src_pos_invalid,
+                char *expected_type_str = object_get_type_union_name(vm->alloc, expected_type);
+                error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, src_pos_invalid,
                                            "Invalid argument %d type, got %s, expected %s",
                                            i, type_str, expected_type_str);
-                ape_free(expected_type_str);
+                allocator_free(vm->alloc, expected_type_str);
                 vm_set_runtime_error(vm, err);
             }
             return false;
@@ -9876,11 +9977,16 @@ static bool check_args(vm_t *vm, bool generate_error, int argc, object_t *args, 
 #include "traceback.h"
 #include "vm.h"
 #include "compiler.h"
+#include "collections.h"
 #endif
 
-traceback_t* traceback_make(void) {
-    traceback_t *traceback = ape_malloc(sizeof(traceback_t));
-    traceback->items = array_make(traceback_item_t);
+traceback_t* traceback_make(allocator_t *alloc) {
+    traceback_t *traceback = allocator_malloc(alloc, sizeof(traceback_t));
+    if (!traceback) {
+        return NULL;
+    }
+    traceback->alloc = alloc;
+    traceback->items = array_make(alloc, traceback_item_t);
     return traceback;
 }
 
@@ -9890,15 +9996,15 @@ void traceback_destroy(traceback_t *traceback) {
     }
     for (int i = 0; i < array_count(traceback->items); i++) {
         traceback_item_t *item = array_get(traceback->items, i);
-        ape_free(item->function_name);
+        allocator_free(traceback->alloc, item->function_name);
     }
     array_destroy(traceback->items);
-    ape_free(traceback);
+    allocator_free(traceback->alloc, traceback);
 }
 
 void traceback_append(traceback_t *traceback, const char *function_name, src_pos_t pos) {
     traceback_item_t item;
-    item.function_name = ape_strdup(function_name);
+    item.function_name = ape_strdup(traceback->alloc, function_name);
     item.pos = pos;
     array_add(traceback->items, &item);
 }
@@ -10039,16 +10145,17 @@ static object_t call_native_function(vm_t *vm, object_t callee, src_pos_t src_po
 static bool check_assign(vm_t *vm, object_t old_value, object_t new_value);
 static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcode_t op, bool *out_overload_found);
 
-vm_t *vm_make(const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors) {
-    vm_t *vm = ape_malloc(sizeof(vm_t));
+vm_t *vm_make(allocator_t *alloc, const ape_config_t *config, gcmem_t *mem, ptrarray(error_t) *errors) {
+    vm_t *vm = allocator_malloc(alloc, sizeof(vm_t));
     memset(vm, 0, sizeof(vm_t));
+    vm->alloc = alloc;
     vm->config = config;
     vm->mem = mem;
     vm->globals_count = 0;
     vm->sp = 0;
     vm->this_sp = 0;
     vm->frames_count = 0;
-    vm->native_functions = array_make(object_t);
+    vm->native_functions = array_make(alloc, object_t);
     vm->errors = errors;
     vm->runtime_error = NULL;
     vm->last_popped = object_make_null();
@@ -10089,7 +10196,7 @@ void vm_destroy(vm_t *vm) {
         return;
     }
     array_destroy(vm->native_functions);
-    ape_free(vm);
+    allocator_free(vm->alloc, vm);
 }
 
 void vm_reset(vm_t *vm) {
@@ -10142,7 +10249,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
     } else if (type == OBJECT_NATIVE_FUNCTION) {
         return call_native_function(vm, callee, src_pos_invalid, argc, args);
     } else {
-        error_t *err = error_make(ERROR_USER, src_pos_invalid, "Object is not callable");
+        error_t *err = error_make(vm->alloc, ERROR_USER, src_pos_invalid, "Object is not callable");
         ptrarray_add(vm->errors, err);
         return object_make_null();
     }
@@ -10150,7 +10257,7 @@ object_t vm_call(vm_t *vm, array(object_t) *constants, object_t callee, int argc
 
 bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants) {
     if (vm->running) {
-        error_t *err = error_make(ERROR_USER, src_pos_invalid, "VM is already executing code");
+        error_t *err = error_make(vm->alloc, ERROR_USER, src_pos_invalid, "VM is already executing code");
         ptrarray_add(vm->errors, err);
         return false;
     }
@@ -10160,7 +10267,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
     frame_init(&new_frame, function, vm->sp - function_function->num_args);
     bool ok = push_frame(vm, new_frame);
     if (!ok) {
-        error_t *err = error_make(ERROR_USER, src_pos_invalid, "Pushing frame failed");
+        error_t *err = error_make(vm->alloc, ERROR_USER, src_pos_invalid, "Pushing frame failed");
         ptrarray_add(vm->errors, err);
         return false;
     }
@@ -10189,7 +10296,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 uint16_t constant_ix = frame_read_uint16(vm->current_frame);
                 object_t *constant = array_get(constants, constant_ix);
                 if (!constant) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                               "Constant at %d not found", constant_ix);
                     vm_set_runtime_error(vm, err);
                     goto err;
@@ -10249,7 +10356,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                         const char *opcode_name = opcode_get_name(opcode);
                         const char *left_type_name = object_get_type_name(left_type);
                         const char *right_type_name = object_get_type_name(right_type);
-                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                    "Invalid operand types for %s, got %s and %s",
                                                    opcode_name, left_type_name, right_type_name);
                         vm_set_runtime_error(vm, err);
@@ -10323,7 +10430,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     }
                     if (!overload_found) {
                         const char *operand_type_string = object_get_type_name(operand_type);
-                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                    "Invalid operand type for MINUS, got %s",
                                                    operand_type_string);
                         vm_set_runtime_error(vm, err);
@@ -10429,7 +10536,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     if (!object_is_hashable(key)) {
                         object_type_t key_type = object_get_type(key);
                         const char *key_type_name = object_get_type_name(key_type);
-                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                    "Key of type %s is not hashable", key_type_name);
                         vm_set_runtime_error(vm, err);
                         goto err;
@@ -10455,7 +10562,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 const char *index_type_name = object_get_type_name(index_type);
 
                 if (left_type != OBJECT_ARRAY && left_type != OBJECT_MAP && left_type != OBJECT_STRING) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                               "Type %s is not indexable", left_type_name);
                     vm_set_runtime_error(vm, err);
                     goto err;
@@ -10465,7 +10572,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
 
                 if (left_type == OBJECT_ARRAY) {
                     if (index_type != OBJECT_NUMBER) {
-                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                   "Cannot index %s with %s", left_type_name, index_type_name);
                         vm_set_runtime_error(vm, err);
                         goto err;
@@ -10499,7 +10606,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 const char *index_type_name = object_get_type_name(index_type);
 
                 if (left_type != OBJECT_ARRAY && left_type != OBJECT_MAP && left_type != OBJECT_STRING) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                "Type %s is not indexable", left_type_name);
                     vm_set_runtime_error(vm, err);
                     goto err;
@@ -10507,7 +10614,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
 
                 object_t res = object_make_null();
                 if (index_type != OBJECT_NUMBER) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                "Cannot index %s with %s", left_type_name, index_type_name);
                     vm_set_runtime_error(vm, err);
                     goto err;
@@ -10581,7 +10688,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 uint16_t ix = frame_read_uint16(vm->current_frame);
                 object_t *val = array_get(vm->native_functions, ix);
                 if (!val) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Native function %d not found", ix);
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Native function %d not found", ix);
                     vm_set_runtime_error(vm, err);
                     goto err;
                 }
@@ -10593,14 +10700,14 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 uint8_t num_free = frame_read_uint8(vm->current_frame);
                 object_t *constant = array_get(constants, constant_ix);
                 if (!constant) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Constant %d not found", constant_ix);
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Constant %d not found", constant_ix);
                     vm_set_runtime_error(vm, err);
                     goto err;
                 }
                 object_type_t constant_type = object_get_type(*constant);
                 if (constant_type != OBJECT_FUNCTION) {
                     const char *type_name = object_get_type_name(constant_type);
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "%s is not a function", type_name);
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "%s is not a function", type_name);
                     vm_set_runtime_error(vm, err);
                     goto err;
                 }
@@ -10645,7 +10752,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 const char *index_type_name = object_get_type_name(index_type);
 
                 if (left_type != OBJECT_ARRAY && left_type != OBJECT_MAP) {
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                               "Type %s is not indexable", left_type_name);
                     vm_set_runtime_error(vm, err);
                     goto err;
@@ -10653,7 +10760,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
 
                 if (left_type == OBJECT_ARRAY) {
                     if (index_type != OBJECT_NUMBER) {
-                        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                                   "Cannot index %s with %s", left_type_name, index_type_name);
                         vm_set_runtime_error(vm, err);
                         goto err;
@@ -10661,7 +10768,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     int ix = (int)object_get_number(index);
                     bool ok = object_set_array_value_at(left, ix, new_value);
                     if (!ok) {
-                        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Setting array item failed (out of bounds?)");
+                        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Setting array item failed (out of bounds?)");
                         vm_set_runtime_error(vm, err);
                         goto err;
                     }
@@ -10692,7 +10799,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     len = (int)strlen(str);
                 } else {
                     const char *type_name = object_get_type_name(type);
-                    error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Cannot get length of %s", type_name);
+                    error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Cannot get length of %s", type_name);
                     vm_set_runtime_error(vm, err);
                     goto err;
                 }
@@ -10713,7 +10820,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
             }
             default: {
                 APE_ASSERT(false);
-                error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Unknown opcode: 0x%x", opcode);
+                error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Unknown opcode: 0x%x", opcode);
                 vm_set_runtime_error(vm, err);
                 goto err;
             }
@@ -10724,7 +10831,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
             if (time_check_counter > time_check_interval) {
                 int elapsed_ms = (int)ape_timer_get_elapsed_ms(&timer);
                 if (elapsed_ms > max_exec_time_ms) {
-                    error_t *err = error_makef(ERROR_OUT_OF_TIME, frame_src_position(vm->current_frame), "Execution took more than %1.17g ms", max_exec_time_ms);
+                    error_t *err = error_makef(vm->alloc, ERROR_TIMEOUT, frame_src_position(vm->current_frame), "Execution took more than %1.17g ms", max_exec_time_ms);
                     vm_set_runtime_error(vm, err);
                     goto err;
                 }
@@ -10746,7 +10853,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
             } else {
                 error_t *err = vm->runtime_error;
                 if (!err->traceback) {
-                    err->traceback = traceback_make();
+                    err->traceback = traceback_make(vm->alloc);
                 }
                 traceback_append_from_vm(err->traceback, vm);
                 while (vm->frames_count > (recover_frame_ix + 1)) {
@@ -10771,7 +10878,7 @@ end:
     if (vm->runtime_error) {
         error_t *err = vm->runtime_error;
         if (!err->traceback) {
-            err->traceback = traceback_make();
+            err->traceback = traceback_make(vm->alloc);
         }
         traceback_append_from_vm(err->traceback, vm);
         ptrarray_add(vm->errors, vm->runtime_error);
@@ -10796,7 +10903,7 @@ void vm_set_global(vm_t *vm, int ix, object_t val) {
 #ifdef APE_DEBUG
     if (ix >= VM_MAX_GLOBALS) {
         APE_ASSERT(false);
-        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Global write out of range");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Global write out of range");
         vm_set_runtime_error(vm, err);
         return;
     }
@@ -10811,7 +10918,7 @@ object_t vm_get_global(vm_t *vm, int ix) {
 #ifdef APE_DEBUG
     if (ix >= VM_MAX_GLOBALS) {
         APE_ASSERT(false);
-        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Global read out of range");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Global read out of range");
         vm_set_runtime_error(vm, err);
         return object_make_null();
     }
@@ -10841,7 +10948,7 @@ static void stack_push(vm_t *vm, object_t obj) {
 #ifdef APE_DEBUG
     if (vm->sp >= VM_STACK_SIZE) {
         APE_ASSERT(false);
-        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Stack overflow");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Stack overflow");
         vm_set_runtime_error(vm, err);
         return;
     }
@@ -10859,7 +10966,7 @@ static void stack_push(vm_t *vm, object_t obj) {
 static object_t stack_pop(vm_t *vm) {
 #ifdef APE_DEBUG
     if (vm->sp == 0) {
-        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "Stack underflow");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Stack underflow");
         vm_set_runtime_error(vm, err);
         APE_ASSERT(false);
         return object_make_null();
@@ -10881,7 +10988,7 @@ static object_t stack_get(vm_t *vm, int nth_item) {
     int ix = vm->sp - 1 - nth_item;
 #ifdef APE_DEBUG
     if (ix < 0 || ix >= VM_STACK_SIZE) {
-        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                   "Invalid stack index: %d", nth_item);
         vm_set_runtime_error(vm, err);
         APE_ASSERT(false);
@@ -10895,7 +11002,7 @@ static void this_stack_push(vm_t *vm, object_t obj) {
 #ifdef APE_DEBUG
     if (vm->this_sp >= VM_THIS_STACK_SIZE) {
         APE_ASSERT(false);
-        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "this stack overflow");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "this stack overflow");
         vm_set_runtime_error(vm, err);
         return;
     }
@@ -10907,7 +11014,7 @@ static void this_stack_push(vm_t *vm, object_t obj) {
 static object_t this_stack_pop(vm_t *vm) {
 #ifdef APE_DEBUG
     if (vm->this_sp == 0) {
-        error_t *err = error_make(ERROR_RUNTIME, frame_src_position(vm->current_frame), "this stack underflow");
+        error_t *err = error_make(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame), "this stack underflow");
         vm_set_runtime_error(vm, err);
         APE_ASSERT(false);
         return object_make_null();
@@ -10921,7 +11028,7 @@ static object_t this_stack_get(vm_t *vm, int nth_item) {
     int ix = vm->this_sp - 1 - nth_item;
 #ifdef APE_DEBUG
     if (ix < 0 || ix >= VM_THIS_STACK_SIZE) {
-        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                    "Invalid this stack index: %d", nth_item);
         vm_set_runtime_error(vm, err);
         APE_ASSERT(false);
@@ -10981,7 +11088,7 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
     if (callee_type == OBJECT_FUNCTION) {
         function_t *callee_function = object_get_function(callee);
         if (num_args != callee_function->num_args) {
-            error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+            error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                        "Invalid number of arguments to \"%s\", expected %d, got %d",
                                        object_get_function_name(callee), callee_function->num_args, num_args);
             vm_set_runtime_error(vm, err);
@@ -10991,7 +11098,7 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
         frame_init(&callee_frame, callee, vm->sp - num_args);
         bool ok = push_frame(vm, callee_frame);
         if (!ok) {
-            error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, "Pushing frame failed in call_object");
+            error_t *err = error_make(vm->alloc, ERROR_RUNTIME, src_pos_invalid, "Pushing frame failed in call_object");
             vm_set_runtime_error(vm, err);
             return false;
         }
@@ -11005,7 +11112,7 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
         stack_push(vm, res);
     } else {
         const char *callee_type_name = object_get_type_name(callee_type);
-        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                    "%s object is not callable", callee_type_name);
         vm_set_runtime_error(vm, err);
         return false;
@@ -11019,13 +11126,13 @@ static object_t call_native_function(vm_t *vm, object_t callee, src_pos_t src_po
     if (vm->runtime_error != NULL && !APE_STREQ(bn->name, "crash")) {
         error_t *err = vm->runtime_error;
         err->pos = src_pos;
-        err->traceback = traceback_make();
+        err->traceback = traceback_make(vm->alloc);
         traceback_append(err->traceback, bn->name, src_pos_invalid);
         return object_make_null();
     }
     object_type_t res_type = object_get_type(res);
     if (res_type == OBJECT_ERROR) {
-        traceback_t *traceback = traceback_make();
+        traceback_t *traceback = traceback_make(vm->alloc);
          // error builtin is treated in a special way
         if (!APE_STREQ(bn->name, "error")) {
             traceback_append(traceback, bn->name, src_pos_invalid);
@@ -11043,7 +11150,7 @@ static bool check_assign(vm_t *vm, object_t old_value, object_t new_value) {
         return true;
     }
     if (old_value_type != new_value_type) {
-        error_t *err = error_makef(ERROR_RUNTIME, frame_src_position(vm->current_frame),
+        error_t *err = error_makef(vm->alloc, ERROR_RUNTIME, frame_src_position(vm->current_frame),
                                    "Trying to assign variable of type %s to %s",
                                    object_get_type_name(new_value_type),
                                    object_get_type_name(old_value_type)
@@ -11105,8 +11212,8 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 8
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_MINOR 9
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
@@ -11138,14 +11245,20 @@ typedef struct ape_program {
 } ape_program_t;
 
 typedef struct ape {
+    allocator_t alloc;
     gcmem_t *mem;
     compiler_t *compiler;
     vm_t *vm;
     ptrarray(ape_error_t) *errors;
     ptrarray(native_fn_wrapper_t) *native_fn_wrappers;
     ape_config_t config;
+
+    allocator_t custom_allocator;
+    error_t allocation_error;
+    bool allocation_error_set;
 } ape_t;
 
+static void ape_deinit(ape_t *ape);
 static object_t ape_native_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args);
 static object_t ape_object_to_object(ape_object_t obj);
 static ape_object_t object_to_ape_object(object_t obj);
@@ -11155,55 +11268,52 @@ static void set_default_config(ape_t *ape);
 static char* read_file_default(void *ctx, const char *filename);
 static size_t write_file_default(void* context, const char *path, const char *string, size_t string_size);
 static size_t stdout_write_default(void* context, const void *data, size_t size);
+static void ape_clear_errors(ape_t *ape);
 
-#undef malloc
-#undef free
-
-ape_malloc_fn ape_malloc = malloc;
-ape_free_fn ape_free = free;
+static void* ape_malloc(void *ctx, size_t size);
+static void ape_free(void *ctx, void *ptr);
 
 //-----------------------------------------------------------------------------
 // Ape
 //-----------------------------------------------------------------------------
-
-void ape_set_memory_functions(ape_malloc_fn malloc_fn, ape_free_fn free_fn) {
-    ape_malloc = malloc_fn;
-    ape_free = free_fn;
-    collections_set_memory_functions(malloc_fn, free_fn);
+ape_t *ape_make(void) {
+    return ape_make_ex(NULL, NULL, NULL);
 }
 
-ape_t *ape_make(void) {
-    ape_t *ape = ape_malloc(sizeof(ape_t));
+ape_t* ape_make_ex(ape_malloc_fn malloc_fn, ape_free_fn free_fn, void *ctx) {
+    allocator_t custom_alloc = allocator_make((allocator_malloc_fn)malloc_fn, (allocator_free_fn)free_fn, ctx);
+    
+    ape_t *ape = allocator_malloc(&custom_alloc, sizeof(ape_t));
     memset(ape, 0, sizeof(ape_t));
+    ape->alloc = allocator_make(ape_malloc, ape_free, ape);
+    ape->custom_allocator = custom_alloc;
 
     set_default_config(ape);
-    
-    ape->mem = gcmem_make();
-    ape->errors = ptrarray_make();
+
+    ape->errors = ptrarray_make(&ape->alloc);
     if (!ape->errors) {
         goto err;
     }
+    ape->mem = gcmem_make(&ape->alloc);
     if (!ape->mem) {
         goto err;
     }
-    ape->compiler = compiler_make(&ape->config, ape->mem, ape->errors);
+    ape->compiler = compiler_make(&ape->alloc, &ape->config, ape->mem, ape->errors);
     if (!ape->compiler) {
         goto err;
     }
-    ape->vm = vm_make(&ape->config, ape->mem, ape->errors);
+    ape->vm = vm_make(&ape->alloc, &ape->config, ape->mem, ape->errors);
     if (!ape->vm) {
         goto err;
     }
-    ape->native_fn_wrappers = ptrarray_make();
+    ape->native_fn_wrappers = ptrarray_make(&ape->alloc);
     if (!ape->native_fn_wrappers) {
         goto err;
     }
     return ape;
 err:
-    gcmem_destroy(ape->mem);
-    compiler_destroy(ape->compiler);
-    vm_destroy(ape->vm);
-    ptrarray_destroy(ape->errors);
+    ape_deinit(ape);
+    allocator_free(&custom_alloc, ape);
     return NULL;
 }
 
@@ -11211,19 +11321,20 @@ void ape_destroy(ape_t *ape) {
     if (!ape) {
         return;
     }
-    ptrarray_destroy_with_items(ape->native_fn_wrappers, ape_free);
-    ptrarray_destroy_with_items(ape->errors, error_destroy);
-    vm_destroy(ape->vm);
-    compiler_destroy(ape->compiler);
-    gcmem_destroy(ape->mem);
-    ape_free(ape);
+    ape_deinit(ape);
+    allocator_t alloc = ape->alloc;
+    allocator_free(&alloc, ape);
+}
+
+void ape_free_allocated(ape_t *ape, void *ptr) {
+    allocator_free(&ape->alloc, ptr);
 }
 
 void ape_set_repl_mode(ape_t *ape, bool enabled) {
     ape->config.repl_mode = enabled;
 }
 
-bool ape_set_max_execution_time(ape_t *ape, double max_execution_time_ms) {
+bool ape_set_timeout(ape_t *ape, double max_execution_time_ms) {
     if (!ape_timer_platform_supported()) {
         ape->config.max_execution_time_ms = 0;
         ape->config.max_execution_time_set = false;
@@ -11256,7 +11367,7 @@ void ape_set_file_read_function(ape_t *ape, ape_read_file_fn file_read, void *co
 }
 
 ape_program_t* ape_compile(ape_t *ape, const char *code) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    ape_clear_errors(ape);
 
     compilation_result_t *comp_res = NULL;
 
@@ -11265,7 +11376,7 @@ ape_program_t* ape_compile(ape_t *ape, const char *code) {
         goto err;
     }
 
-    ape_program_t *program = ape_malloc(sizeof(ape_program_t));
+    ape_program_t *program = allocator_malloc(&ape->alloc, sizeof(ape_program_t));
     program->ape = ape;
     program->comp_res = comp_res;
     return program;
@@ -11276,7 +11387,7 @@ err:
 }
 
 ape_program_t* ape_compile_file(ape_t *ape, const char *path) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    ape_clear_errors(ape);
 
     compilation_result_t *comp_res = NULL;
 
@@ -11285,7 +11396,7 @@ ape_program_t* ape_compile_file(ape_t *ape, const char *path) {
         goto err;
     }
 
-    ape_program_t *program = ape_malloc(sizeof(ape_program_t));
+    ape_program_t *program = allocator_malloc(&ape->alloc, sizeof(ape_program_t));
     program->ape = ape;
     program->comp_res = comp_res;
     return program;
@@ -11299,7 +11410,7 @@ ape_object_t ape_execute_program(ape_t *ape, const ape_program_t *program) {
     reset_state(ape);
  
     if (ape != program->ape) {
-        error_t *err = error_make(ERROR_USER, src_pos_invalid, "ape program was compiled with a different ape instance");
+        error_t *err = error_make(&ape->alloc, ERROR_USER, src_pos_invalid, "ape program was compiled with a different ape instance");
         ptrarray_add(ape->errors, err);
         return ape_object_make_null();
     }
@@ -11324,7 +11435,7 @@ void ape_program_destroy(ape_program_t *program) {
         return;
     }
     compilation_result_destroy(program->comp_res);
-    ape_free(program);
+    allocator_free(&program->ape->alloc, program);
 }
 
 ape_object_t ape_execute(ape_t *ape, const char *code) {
@@ -11404,19 +11515,27 @@ ape_object_t ape_call(ape_t *ape, const char *function_name, int argc, ape_objec
 }
 
 bool ape_has_errors(const ape_t *ape) {
-    return ptrarray_count(ape->errors) > 0;
+    return ape_errors_count(ape) > 0;
 }
 
 int ape_errors_count(const ape_t *ape) {
-    return ptrarray_count(ape->errors);
+    if (ape->allocation_error_set) {
+        return ptrarray_count(ape->errors) + 1;
+    } else {
+        return ptrarray_count(ape->errors);
+    }
 }
 
 const ape_error_t* ape_get_error(const ape_t *ape, int index) {
-    return ptrarray_get(ape->errors, index);
+    if (ape->allocation_error_set && index == ptrarray_count(ape->errors)) {
+        return (const ape_error_t*)&ape->allocation_error;
+    } else {
+        return ptrarray_get(ape->errors, index);
+    }
 }
 
 bool ape_set_native_function(ape_t *ape, const char *name, ape_native_fn fn, void *data) {
-    native_fn_wrapper_t *wrapper = ape_malloc(sizeof(native_fn_wrapper_t));
+    native_fn_wrapper_t *wrapper = allocator_malloc(&ape->alloc, sizeof(native_fn_wrapper_t));
     memset(wrapper, 0, sizeof(native_fn_wrapper_t));
     wrapper->fn = fn;
     wrapper->ape = ape;
@@ -11436,7 +11555,7 @@ bool ape_set_global_constant(ape_t *ape, const char *name, ape_object_t obj) {
     if (symbol_table_symbol_is_defined(symbol_table, name)) {
         symbol = symbol_table_resolve(symbol_table, name);
         if (symbol->type != SYMBOL_GLOBAL) {
-            error_t *err = error_makef(ERROR_USER, src_pos_invalid,
+            error_t *err = error_makef(&ape->alloc, ERROR_USER, src_pos_invalid,
                                        "Symbol \"%s\" already defined outside global scope", name);
             ptrarray_add(ape->errors, err);
             return false;
@@ -11452,7 +11571,7 @@ ape_object_t ape_get_object(ape_t *ape, const char *name) {
     symbol_table_t *st = compiler_get_symbol_table(ape->compiler);
     symbol_t *symbol = symbol_table_resolve(st, name);
     if (!symbol) {
-        error_t *err = error_makef(ERROR_USER, src_pos_invalid,
+        error_t *err = error_makef(&ape->alloc, ERROR_USER, src_pos_invalid,
                                    "Symbol \"%s\" is not defined", name);
         ptrarray_add(ape->errors, err);
         return ape_object_make_null();
@@ -11464,7 +11583,7 @@ ape_object_t ape_get_object(ape_t *ape, const char *name) {
         object_t *res_ptr = array_get(ape->vm->native_functions, symbol->index);
         res = *res_ptr;
     } else {
-        error_t *err = error_makef(ERROR_USER, src_pos_invalid,
+        error_t *err = error_makef(&ape->alloc, ERROR_USER, src_pos_invalid,
                                    "Value associated with symbol \"%s\" could not be loaded", name);
         ptrarray_add(ape->errors, err);
         return ape_object_make_null();
@@ -11518,7 +11637,7 @@ ape_object_t ape_object_make_stringf(ape_t *ape, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *res = (char*)ape_malloc(to_write + 1);
+    char *res = (char*)allocator_malloc(&ape->alloc, to_write + 1);
     int written = vsprintf(res, fmt, args);
     (void)written;
     APE_ASSERT(written == to_write);
@@ -11539,7 +11658,7 @@ ape_object_t ape_object_make_map(ape_t *ape) {
 }
 
 ape_object_t ape_object_make_native_function(ape_t *ape, ape_native_fn fn, void *data) {
-    native_fn_wrapper_t *wrapper = ape_malloc(sizeof(native_fn_wrapper_t));
+    native_fn_wrapper_t *wrapper = allocator_malloc(&ape->alloc,sizeof(native_fn_wrapper_t));
     memset(wrapper, 0, sizeof(native_fn_wrapper_t));
     wrapper->fn = fn;
     wrapper->ape = ape;
@@ -11559,7 +11678,7 @@ ape_object_t ape_object_make_errorf(ape_t *ape, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *res = (char*)ape_malloc(to_write + 1);
+    char *res = (char*)allocator_malloc(&ape->alloc, to_write + 1);
     int written = vsprintf(res, fmt, args);
     (void)written;
     APE_ASSERT(written == to_write);
@@ -11572,8 +11691,8 @@ ape_object_t ape_object_make_external(ape_t *ape, void *data) {
     return object_to_ape_object(res);
 }
 
-char *ape_object_serialize(ape_object_t obj) {
-    return object_serialize(ape_object_to_object(obj));
+char *ape_object_serialize(ape_t *ape, ape_object_t obj) {
+    return object_serialize(&ape->alloc, ape_object_to_object(obj));
 }
 
 void ape_object_disable_gc(ape_object_t ape_obj) {
@@ -11607,7 +11726,7 @@ ape_object_t ape_object_deep_copy(ape_object_t ape_obj) {
 }
 
 void ape_set_runtime_error(ape_t *ape, const char *message) {
-    error_t *err = error_make(ERROR_RUNTIME, src_pos_invalid, message);
+    error_t *err = error_make(&ape->alloc, ERROR_RUNTIME, src_pos_invalid, message);
     ptrarray_add(ape->errors, err);
 }
 
@@ -11617,11 +11736,11 @@ void ape_set_runtime_errorf(ape_t *ape, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *message = (char*)ape_malloc(to_write + 1);
+    char *message = (char*)allocator_malloc(&ape->alloc, to_write + 1);
     vsprintf(message, fmt, args);
     va_end(args);
 
-    error_t *err = error_make_no_copy(ERROR_RUNTIME, src_pos_invalid, message);
+    error_t *err = error_make_no_copy(&ape->alloc, ERROR_RUNTIME, src_pos_invalid, message);
 
     ptrarray_add(ape->errors, err);
 }
@@ -11907,11 +12026,17 @@ const char* ape_error_get_line(const ape_error_t *ape_error) {
 
 int ape_error_get_line_number(const ape_error_t *ape_error) {
     const error_t *error = (const error_t*)ape_error;
+    if (error->pos.line < 0) {
+        return -1;
+    }
     return error->pos.line + 1;
 }
 
 int ape_error_get_column_number(const ape_error_t *ape_error) {
     const error_t *error = (const error_t*)ape_error;
+    if (error->pos.column < 0) {
+        return -1;
+    }
     return error->pos.column + 1;
 }
 
@@ -11922,7 +12047,8 @@ ape_error_type_t ape_error_get_type(const ape_error_t *ape_error) {
         case ERROR_PARSING:     return APE_ERROR_PARSING;
         case ERROR_COMPILATION: return APE_ERROR_COMPILATION;
         case ERROR_RUNTIME:     return APE_ERROR_RUNTIME;
-        case ERROR_OUT_OF_TIME: return APE_ERROR_OUT_OF_TIME;
+        case ERROR_TIMEOUT:     return APE_ERROR_TIMEOUT;
+        case ERROR_ALLOCATION:  return APE_ERROR_ALLOCATION;
         case ERROR_USER:        return APE_ERROR_USER;
         default:                return APE_ERROR_NONE;
     }
@@ -11937,19 +12063,20 @@ const char* ape_error_type_to_string(ape_error_type_t type) {
         case APE_ERROR_PARSING:     return "PARSING";
         case APE_ERROR_COMPILATION: return "COMPILATION";
         case APE_ERROR_RUNTIME:     return "RUNTIME";
-        case APE_ERROR_OUT_OF_TIME: return "OUT_OF_TIME";
+        case APE_ERROR_TIMEOUT:     return "TIMEOUT";
+        case APE_ERROR_ALLOCATION:  return "ALLOCATION";
         case APE_ERROR_USER:        return "USER";
         default:                    return "NONE";
     }
 }
 
-char* ape_error_serialize(const ape_error_t *err) {
+char* ape_error_serialize(ape_t *ape, const ape_error_t *err) {
     const char *type_str = ape_error_get_type_string(err);
     const char *filename = ape_error_get_filepath(err);
     const char *line = ape_error_get_line(err);
     int line_num = ape_error_get_line_number(err);
     int col_num = ape_error_get_column_number(err);
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(&ape->alloc);
     if (line) {
         strbuf_append(buf, line);
         strbuf_append(buf, "\n");
@@ -12032,6 +12159,17 @@ const char* ape_traceback_get_function_name(const ape_traceback_t *ape_traceback
 //-----------------------------------------------------------------------------
 // Ape internal
 //-----------------------------------------------------------------------------
+static void ape_deinit(ape_t *ape) {
+    for (int i = 0; i < ptrarray_count(ape->native_fn_wrappers); i++) {
+        void *item = ptrarray_get(ape->native_fn_wrappers, i);
+        allocator_free(&ape->alloc, item);
+    }
+    ptrarray_destroy(ape->native_fn_wrappers);
+    vm_destroy(ape->vm);
+    compiler_destroy(ape->compiler);
+    gcmem_destroy(ape->mem);
+    ptrarray_destroy_with_items(ape->errors, error_destroy);
+}
 
 static object_t ape_native_fn_wrapper(vm_t *vm, void *data, int argc, object_t *args) {
     (void)vm;
@@ -12053,21 +12191,21 @@ static ape_object_t object_to_ape_object(object_t obj) {
 }
 
 static void reset_state(ape_t *ape) {
-    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
+    ape_clear_errors(ape);
     vm_reset(ape->vm);
 }
 
 static void set_default_config(ape_t *ape) {
     memset(&ape->config, 0, sizeof(ape_config_t));
     ape_set_repl_mode(ape, false);
-    ape_set_max_execution_time(ape, -1);
-    ape_set_file_read_function(ape, read_file_default, NULL);
-    ape_set_file_write_function(ape, write_file_default, NULL);
-    ape_set_stdout_write_function(ape, stdout_write_default, NULL);
+    ape_set_timeout(ape, -1);
+    ape_set_file_read_function(ape, read_file_default, ape);
+    ape_set_file_write_function(ape, write_file_default, ape);
+    ape_set_stdout_write_function(ape, stdout_write_default, ape);
 }
 
 static char* read_file_default(void *ctx, const char *filename){
-    (void)ctx;
+    ape_t *ape = (ape_t*)ctx;
     FILE *fp = fopen(filename, "r");
     size_t size_to_read = 0;
     size_t size_read = 0;
@@ -12084,7 +12222,7 @@ static char* read_file_default(void *ctx, const char *filename){
     }
     size_to_read = pos;
     rewind(fp);
-    file_contents = (char*)ape_malloc(sizeof(char) * (size_to_read + 1));
+    file_contents = (char*)allocator_malloc(&ape->alloc, sizeof(char) * (size_to_read + 1));
     if (!file_contents) {
         fclose(fp);
         return NULL;
@@ -12114,5 +12252,25 @@ static size_t write_file_default(void* ctx, const char *path, const char *string
 static size_t stdout_write_default(void* ctx, const void *data, size_t size) {
     (void)ctx;
     return fwrite(data, 1, size, stdout);
+}
+
+static void* ape_malloc(void *ctx, size_t size) {
+    ape_t *ape = (ape_t*)ctx;
+    void *res = allocator_malloc(&ape->custom_allocator, size);
+    if (!res) {
+        ape->allocation_error = error_make_allocation_error();
+        ape->allocation_error_set = true;
+    }
+    return res;
+}
+
+static void ape_free(void *ctx, void *ptr) {
+    ape_t *ape = (ape_t*)ctx;
+    allocator_free(&ape->custom_allocator, ptr);
+}
+
+static void ape_clear_errors(ape_t *ape) {
+    ape->allocation_error_set = false;
+    ptrarray_clear_and_destroy_items(ape->errors, error_destroy);
 }
 //FILE_END

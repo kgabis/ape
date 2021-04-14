@@ -24,6 +24,7 @@ void repl_start() {
     ape_t *ape = ape_make();
 
     ape_set_repl_mode(ape, true);
+    ape_set_timeout(ape, 1.0);
 
     ape_set_native_function(ape, "exit", exit_repl, &exit);
     ape_set_global_constant(ape, "test", ape_object_make_number(123));
@@ -45,7 +46,7 @@ void repl_start() {
             continue;
         }
 
-        char *object_str = ape_object_serialize(res);
+        char *object_str = ape_object_serialize(ape, res);
         puts(object_str);
         free(object_str);
     }
@@ -58,7 +59,7 @@ static void print_errors(ape_t *ape, const char *line) {
     int count = ape_errors_count(ape);
     for (int i = 0; i < count; i++) {
         const ape_error_t *err = ape_get_error(ape, i);
-        char *err_str = ape_error_serialize(err);
+        char *err_str = ape_error_serialize(ape, err);
         puts(err_str);
         free(err_str);
     }

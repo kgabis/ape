@@ -40,7 +40,7 @@ static void test_code_make() {
 
     for (int i = 0; i < APE_ARRAY_LEN(tests); i++) {
         typeof(tests[0]) test = tests[i];
-        array(uint8_t) *instruction = array_make(uint8_t);
+        array(uint8_t) *instruction = array_make(NULL, uint8_t);
         bool ok = code_make(test.op, test.operands_count, test.operands, instruction);
         assert(ok);
         assert(array_count(instruction) == test.expected_len);
@@ -57,7 +57,7 @@ static void test_code_make() {
 }
 
 static void test_instr_strings() {
-    array(uint8_t) *code = array_make(uint8_t);
+    array(uint8_t) *code = array_make(NULL, uint8_t);
     code_make(OPCODE_ADD, 0, (uint64_t[]){0}, code);
     code_make(OPCODE_GET_LOCAL, 1, (uint64_t[]){0x1}, code);
     code_make(OPCODE_CONSTANT, 1, (uint64_t[]){0x2}, code);
@@ -74,7 +74,7 @@ static void test_instr_strings() {
 0013 NUMBER 1.2\n\
 ";
 
-    strbuf_t *buf = strbuf_make();
+    strbuf_t *buf = strbuf_make(NULL);
     code_to_string(array_data(code), NULL, array_count(code), buf);
     const char *serialized = strbuf_get_string(buf);
     assert(APE_STREQ(serialized, expected));
@@ -96,7 +96,7 @@ static void test_read_operands() {
 
     for (int i = 0; i < APE_ARRAY_LEN(tests); i++) {
         typeof(tests[0]) test = tests[i];
-        array(uint8_t) *instruction = array_make(uint8_t);
+        array(uint8_t) *instruction = array_make(NULL, uint8_t);
         bool ok = code_make(test.op, test.operands_count, test.operands, instruction);
         assert(ok);
         opcode_definition_t *def = opcode_lookup(test.op);

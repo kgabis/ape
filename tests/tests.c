@@ -22,6 +22,7 @@ int tests_main() {
 #if 0
 } // unconfuse xcode
 #endif
+   
     lexer_test();
     parser_test();
     code_test();
@@ -57,7 +58,7 @@ void print_errors(ptrarray(error_t) *errors) {
 }
 
 ptrarray(char)* get_lines(const char *code) {
-    ptrarray(char)* res = ptrarray_make();
+    ptrarray(char)* res = ptrarray_make(NULL);
     if (!code) {
         return res;
     }

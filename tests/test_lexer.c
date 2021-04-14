@@ -213,7 +213,7 @@ static void test_lexing() {
     };
 
     lexer_t lexer;
-    lexer_init(&lexer, input, NULL);
+    lexer_init(&lexer, NULL, input, NULL);
 
     for (int i = 0; i < APE_ARRAY_LEN(expected_tokens); i++) {
         token_t test_tok = expected_tokens[i];
@@ -256,7 +256,7 @@ var five = 5;\n\
     };
 
     lexer_t lexer;
-    lexer_init(&lexer, input, NULL);
+    lexer_init(&lexer, NULL, input, NULL);
 
     for (int i = 0; i < APE_ARRAY_LEN(expected_tokens); i++) {
         token_t test_tok = expected_tokens[i];

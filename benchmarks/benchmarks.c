@@ -7,11 +7,11 @@
 #include "ape.h"
 
 static bool execute_file(const char *filename, bool must_succeed);
-static void *counted_malloc(size_t size);
-static void counted_free(void *ptr);
+static void *counted_malloc(void *ctx, size_t size);
+static void counted_free(void *ctx, void *ptr);
 static void print_ape_errors(ape_t *ape);
 
-static int g_malloc_count;
+static int g_malloc_count = 0;
 
 #ifdef APE_BENCHMARKS_MAIN
 int main(int argc, char *argv[]) {
@@ -32,7 +32,6 @@ int main(int argc, char *argv[]) {
     } // unconfuse xcode
 #endif
 
-    ape_set_memory_functions(counted_malloc, counted_free);
     for (int i = 0; i < tests_len; i++) {
         const char *test = tests[i];
         g_malloc_count = 0;
@@ -44,12 +43,11 @@ int main(int argc, char *argv[]) {
         printf("%1.10g seconds\n", (double)seconds);
         assert(g_malloc_count == 0);
     }
-    ape_set_memory_functions(malloc, free);
     return 0;
 }
 
 static bool execute_file(const char *filename, bool must_succeed) {
-    ape_t *ape = ape_make();
+    ape_t *ape = ape_make_ex(counted_malloc, counted_free, &g_malloc_count);
 
     ape_program_t *program = ape_compile_file(ape, filename);
     if (!program || ape_has_errors(ape)) {
@@ -66,21 +64,23 @@ static bool execute_file(const char *filename, bool must_succeed) {
     return true;
 }
 
-static void *counted_malloc(size_t size) {
+static void *counted_malloc(void *ctx, size_t size) {
+    int *malloc_count = (int*)ctx;
     if (size == 0) {
         return NULL;
     }
     void *res = malloc(size);
-    g_malloc_count++;
+    (*malloc_count)++;
     assert(res != NULL);
     return res;
 }
 
-static void counted_free(void *ptr) {
+static void counted_free(void *ctx, void *ptr) {
+    int *malloc_count = (int*)ctx;
     if (ptr == NULL) {
         return;
     }
-    g_malloc_count--;
+    (*malloc_count)--;
     free(ptr);
 }
 
@@ -89,8 +89,8 @@ static void print_ape_errors(ape_t *ape) {
     int count = ape_errors_count(ape);
     for (int i = 0; i < count; i++) {
         const ape_error_t *err = ape_get_error(ape, i);
-        char *err_str = ape_error_serialize(err);
+        char *err_str = ape_error_serialize(ape, err);
         puts(err_str);
-        counted_free(err_str);
+        ape_free_allocated(ape, err_str);
     }
 }

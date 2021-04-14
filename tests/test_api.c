@@ -24,9 +24,14 @@ static void test_calling_functions(void);
 static void test_traceback(void);
 static void test_various(void);
 static void test_time_limit(void);
+static void test_allocation_fails(void);
 
-static void *counted_malloc(size_t size);
-static void counted_free(void *ptr);
+static void *failing_malloc(void *ctx, size_t size);
+static void failing_free(void *ctx, void *ptr);
+
+static void *counted_malloc(void *ctx, size_t size);
+static void counted_free(void *ctx, void *ptr);
+
 static char* read_file(const char * filename);
 static void print_ape_errors(ape_t *ape);
 static size_t stdout_write(void* context, const void *data, size_t size);
@@ -41,14 +46,12 @@ static ape_object_t fourtytwo_fun(ape_t *ape, void *data, int argc, ape_object_t
 static ape_object_t vec2_add_fun(ape_t *ape, void *data, int argc, ape_object_t *args);
 static ape_object_t vec2_sub_fun(ape_t *ape, void *data, int argc, ape_object_t *args);
 
-static int g_malloc_count;
 static int g_external_fn_test;
     
 static char g_stdout_buf[1024];
 
 void api_test() {
     puts("### API test");
-    ape_set_memory_functions(counted_malloc, counted_free);
     test_repl();
     test_program();
     test_compiling();
@@ -57,7 +60,7 @@ void api_test() {
     test_traceback();
     test_various();
     test_time_limit();
-    ape_set_memory_functions(malloc, free);
+    test_allocation_fails();
 }
 
 // INTERNAL
@@ -67,8 +70,8 @@ static void test_repl() {
     assert(inputs);
     ptrarray(char) *lines = get_lines(inputs);
 
-    g_malloc_count = 0;
-    ape_t *ape = ape_make();
+    int malloc_count = 0;
+    ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
 
     ape_set_repl_mode(ape, true);
     ape_set_stdout_write_function(ape, stdout_write, NULL);
@@ -85,16 +88,16 @@ static void test_repl() {
         }
     }
     ape_destroy(ape);
-    assert(g_malloc_count == 0);
+    assert(malloc_count == 0);
     ptrarray_destroy_with_items(lines, free);
     free(inputs);
 }
 
 static void test_program() {
     g_external_fn_test = 0;
-    g_malloc_count = 0;
+    int malloc_count = 0;
 
-    ape_t *ape = ape_make();
+    ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
 
     ape_set_stdout_write_function(ape, stdout_write, NULL);
 
@@ -116,17 +119,17 @@ static void test_program() {
     int val_num = (int)ape_object_get_number(val);
     assert(val_num == 123);
     ape_destroy(ape);
-    assert(g_malloc_count == 0);
+    assert(malloc_count == 0);
     assert(g_external_fn_test == 42);
 }
 
 static void test_compiling() {
     g_external_fn_test = 0;
-    g_malloc_count = 0;
+    int malloc_count = 0;
     char *code = read_file("program.bn");
     assert(code);
 
-    ape_t *ape = ape_make();
+    ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
     ape_set_stdout_write_function(ape, stdout_write, NULL);
 
     ape_set_native_function(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
@@ -157,8 +160,8 @@ static void test_compiling() {
     ape_program_destroy(program);
 
     ape_destroy(ape);
-    ape_free(code);
-    assert(g_malloc_count == 0);
+    free(code);
+    assert(malloc_count == 0);
     assert(g_external_fn_test == 42);
 }
 
@@ -168,13 +171,13 @@ static void test_fails() {
     assert(fails);
     ptrarray(char) *lines = get_lines(fails);
     for (int i = 0; i < ptrarray_count(lines); i++) {
-        g_malloc_count = 0;
+        int malloc_count = 0;
         const char *line = ptrarray_get(lines, i);
         if (strlen(line) == 0) {
             continue;
         }
         
-        ape_t *ape = ape_make();
+        ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
 
         ape_execute(ape, line);
         if (!ape_has_errors(ape)) {
@@ -183,14 +186,15 @@ static void test_fails() {
 
         ape_destroy(ape);
 
-        assert(g_malloc_count == 0);
+        assert(malloc_count == 0);
     }
     ptrarray_destroy_with_items(lines, free);
     free(fails);
 }
 
 static void test_calling_functions() {
-    ape_t *ape = ape_make();
+    int malloc_count = 0;
+    ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
 
     ape_set_stdout_write_function(ape, stdout_write, NULL);
 
@@ -277,15 +281,16 @@ static void test_calling_functions() {
     assert(ape_object_get_number(res) == strlen("lorem"));
 
     ape_destroy(ape);
+    assert(malloc_count == 0);
 }
 
 static void test_traceback() {
     char *program = read_file("tracebacks.bn");
     assert(program);
 
-    g_malloc_count = 0;
-    ape_t *ape = ape_make();
-    
+    int malloc_count = 0;
+    ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
+
     ape_set_native_function(ape, "custom_error", custom_error_fun, NULL);
 
     ape_execute(ape, program);
@@ -400,7 +405,7 @@ static void test_traceback() {
     }
 
     ape_destroy(ape);
-    assert(g_malloc_count == 0);
+    assert(malloc_count == 0);
 
     free(program);
 }
@@ -423,16 +428,15 @@ static void test_various() {
 }
 
 static void test_time_limit() {
-    g_malloc_count = 0;
-
     const char *tests[] = {
         "while (true) {}",
         "fn(){ while (true) {}}()"
     };
 
     for (int i = 0; i < APE_ARRAY_LEN(tests); i++) {
-        ape_t *ape = ape_make();
-        bool limit_set = ape_set_max_execution_time(ape, 1.0);
+        int malloc_count = 0;
+        ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
+        bool limit_set = ape_set_timeout(ape, 1.0);
         if (!limit_set) {
             puts("CAN'T TEST MAX EXECUTION TIME");
             return;
@@ -447,23 +451,53 @@ static void test_time_limit() {
 
         const ape_error_t *err = ape_get_error(ape, 0);
 
-        assert(ape_error_get_type(err) == APE_ERROR_OUT_OF_TIME);
+        assert(ape_error_get_type(err) == APE_ERROR_TIMEOUT);
         ape_destroy(ape);
-        assert(g_malloc_count == 0);
+        assert(malloc_count == 0);
     }
 }
 
-static void *counted_malloc(size_t size) {
+static void test_allocation_fails() {
+    bool malloc_should_fail = false;
+    ape_t *ape = ape_make_ex(failing_malloc, failing_free, &malloc_should_fail);
+    assert(ape);
+    malloc_should_fail = true;
+    ape_execute(ape, "println(\"\")");
+
+    assert(ape_has_errors(ape));
+    assert(ape_errors_count(ape) == 1);
+
+    const ape_error_t *err = ape_get_error(ape, 0);
+
+    assert(ape_error_get_type(err) == APE_ERROR_ALLOCATION);
+    ape_destroy(ape);
+}
+
+static void *failing_malloc(void *ctx, size_t size) {
+    bool *fail = (bool*)ctx;
+    if (*fail) {
+        return NULL;
+    }
+    return malloc(size);
+}
+
+static void failing_free(void *ctx, void *ptr) {
+    free(ptr);
+}
+
+static void *counted_malloc(void *ctx, size_t size) {
+    int *malloc_count = (int*)ctx;
     void *res = malloc(size);
     if (res != NULL) {
-        g_malloc_count++;
+        (*malloc_count)++;
     }
     return res;
 }
 
-static void counted_free(void *ptr) {
+static void counted_free(void *ctx, void *ptr) {
+    int *malloc_count = (int*)ctx;
     if (ptr != NULL) {
-        g_malloc_count--;
+        (*malloc_count)--;
     }
     free(ptr);
 }
@@ -485,7 +519,7 @@ static char * read_file(const char * filename) {
     }
     size_to_read = pos;
     rewind(fp);
-    file_contents = (char*)ape_malloc(sizeof(char) * (size_to_read + 1));
+    file_contents = (char*)malloc(sizeof(char) * (size_to_read + 1));
     if (!file_contents) {
         fclose(fp);
         return NULL;
@@ -504,9 +538,9 @@ static char * read_file(const char * filename) {
 static void print_ape_errors(ape_t *ape) {
     for (int i = 0; i < ape_errors_count(ape); i++) {
         const ape_error_t *err = ape_get_error(ape, i);
-        char *err_str = ape_error_serialize(err);
+        char *err_str = ape_error_serialize(ape, err);
         puts(err_str);
-        ape_free(err_str);
+        ape_free_allocated(ape, err_str);
     }
 }
 
@@ -552,9 +586,9 @@ static ape_object_t make_test_dict_fun(ape_t *ape, void *data, int argc, ape_obj
 
     ape_object_t res = ape_object_make_map(ape);
     for (int i = 0; i < num_items; i++) {
-        char *key_name = ape_stringf("%d", i);
+        char *key_name = ape_stringf(NULL, "%d", i);
         ape_object_t key = ape_object_make_string(ape, key_name);
-        ape_free(key_name);
+        free(key_name);
         ape_object_t val = ape_object_make_number(i);
         ape_object_set_map_value_with_value_key(res, key, val);
     }

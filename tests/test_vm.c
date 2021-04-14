@@ -79,9 +79,9 @@ static object_t execute(const char *input, bool must_succeed) {
 
     config.repl_mode = true;
 
-    gcmem_t *mem = gcmem_make();
+    gcmem_t *mem = gcmem_make(NULL);
 
-    compiler_t *comp = compiler_make(&config, mem, ptrarray_make());
+    compiler_t *comp = compiler_make(NULL, &config, mem, ptrarray_make(NULL));
 
     compilation_result_t *comp_res = compiler_compile(comp, input);
     if (!comp_res || ptrarray_count(comp->errors) > 0) {
@@ -89,7 +89,7 @@ static object_t execute(const char *input, bool must_succeed) {
         assert(false); // can only fail on vm_run
     }
 
-    vm_t *vm = vm_make(NULL, mem, ptrarray_make());
+    vm_t *vm = vm_make(NULL, NULL, mem, ptrarray_make(NULL));
     ok = vm_run(vm, comp_res, comp->constants);
     assert(vm->sp == 0);
 
@@ -1035,11 +1035,11 @@ static void test_errors() {
 
         bool ok = false;
 
-        gcmem_t *mem = gcmem_make();
+        gcmem_t *mem = gcmem_make(NULL);
 
         ape_config_t *config = malloc(sizeof(ape_config_t));
         config->repl_mode = true;
-        compiler_t *comp = compiler_make(config, mem, ptrarray_make());
+        compiler_t *comp = compiler_make(NULL, config, mem, ptrarray_make(NULL));
 
         compilation_result_t *comp_res = compiler_compile(comp, test.input);
         if (!comp_res || ptrarray_count(comp->errors) > 0) {
@@ -1047,7 +1047,7 @@ static void test_errors() {
             assert(false); // can only fail on vm_run
         }
 
-        vm_t *vm = vm_make(NULL, mem, ptrarray_make());
+        vm_t *vm = vm_make(NULL, NULL, mem, ptrarray_make(NULL));
         ok = vm_run(vm, comp_res, comp->constants);
 
         assert(!ok);

@@ -44,9 +44,9 @@ void test_define(symbol_table_t *table, const char *name, symbol_type_t type, in
 }
 
 void test_defines() {
-    symbol_table_t *global = symbol_table_make(NULL);
-    symbol_table_t *first_local = symbol_table_make(global);
-    symbol_table_t *second_local = symbol_table_make(first_local);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
+    symbol_table_t *first_local = symbol_table_make(NULL, global);
+    symbol_table_t *second_local = symbol_table_make(NULL, first_local);
 
     test_define(global, "a", SYMBOL_GLOBAL, 0);
     test_define(global, "b", SYMBOL_GLOBAL, 1);
@@ -59,13 +59,13 @@ void test_defines() {
 }
 
 void test_resolve_global() {
-    symbol_table_t *table = symbol_table_make(NULL);
+    symbol_table_t *table = symbol_table_make(NULL, NULL);
     symbol_table_define(table, "a", true);
     symbol_table_define(table, "b", true);
 
     symbol_t *expected[] = {
-        symbol_make("a", SYMBOL_GLOBAL, 0, true),
-        symbol_make("b", SYMBOL_GLOBAL, 1, true),
+        symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+        symbol_make(NULL, "b", SYMBOL_GLOBAL, 1, true),
     };
 
     for (int i = 0; i < APE_ARRAY_LEN(expected); i++) {
@@ -79,19 +79,19 @@ void test_resolve_global() {
 }
 
 void test_resolve_local() {
-    symbol_table_t *global = symbol_table_make(NULL);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
     symbol_table_define(global, "a", true);
     symbol_table_define(global, "b", true);
 
-    symbol_table_t *local = symbol_table_make(global);
+    symbol_table_t *local = symbol_table_make(NULL, global);
     symbol_table_define(local, "c", true);
     symbol_table_define(local, "d", true);
 
     symbol_t *expected[] = {
-        symbol_make("a", SYMBOL_GLOBAL, 0, true),
-        symbol_make("b", SYMBOL_GLOBAL, 1, true),
-        symbol_make("c", SYMBOL_LOCAL, 0, true),
-        symbol_make("d", SYMBOL_LOCAL, 1, true),
+        symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+        symbol_make(NULL, "b", SYMBOL_GLOBAL, 1, true),
+        symbol_make(NULL, "c", SYMBOL_LOCAL, 0, true),
+        symbol_make(NULL, "d", SYMBOL_LOCAL, 1, true),
     };
 
     for (int i = 0; i < APE_ARRAY_LEN(expected); i++) {
@@ -105,15 +105,15 @@ void test_resolve_local() {
 }
 
 void test_resolve_nested_local() {
-    symbol_table_t *global = symbol_table_make(NULL);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
     symbol_table_define(global, "a", true);
     symbol_table_define(global, "b", true);
 
-    symbol_table_t *first_local = symbol_table_make(global);
+    symbol_table_t *first_local = symbol_table_make(NULL, global);
     symbol_table_define(first_local, "c", true);
     symbol_table_define(first_local, "d", true);
 
-    symbol_table_t *second_local = symbol_table_make(first_local);
+    symbol_table_t *second_local = symbol_table_make(NULL, first_local);
     symbol_table_define(second_local, "e", true);
     symbol_table_define(second_local, "f", true);
 
@@ -126,20 +126,20 @@ void test_resolve_nested_local() {
             first_local,
             4,
             {
-                symbol_make("a", SYMBOL_GLOBAL, 0, true),
-                symbol_make("b", SYMBOL_GLOBAL, 1, true),
-                symbol_make("c", SYMBOL_LOCAL, 0, true),
-                symbol_make("d", SYMBOL_LOCAL, 1, true),
+                symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+                symbol_make(NULL, "b", SYMBOL_GLOBAL, 1, true),
+                symbol_make(NULL, "c", SYMBOL_LOCAL, 0, true),
+                symbol_make(NULL, "d", SYMBOL_LOCAL, 1, true),
             }
         },
         {
             second_local,
             4,
             {
-                symbol_make("a", SYMBOL_GLOBAL, 0, true),
-                symbol_make("b", SYMBOL_GLOBAL, 1, true),
-                symbol_make("e", SYMBOL_LOCAL, 0, true),
-                symbol_make("f", SYMBOL_LOCAL, 1, true),
+                symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+                symbol_make(NULL, "b", SYMBOL_GLOBAL, 1, true),
+                symbol_make(NULL, "e", SYMBOL_LOCAL, 0, true),
+                symbol_make(NULL, "f", SYMBOL_LOCAL, 1, true),
             }
         },
     };
@@ -159,9 +159,9 @@ void test_resolve_nested_local() {
 }
 
 void test_resolve_native_functions() {
-    symbol_table_t *global = symbol_table_make(NULL);
-    symbol_table_t *first_local = symbol_table_make(global);
-    symbol_table_t *second_local = symbol_table_make(first_local);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
+    symbol_table_t *first_local = symbol_table_make(NULL, global);
+    symbol_table_t *second_local = symbol_table_make(NULL, first_local);
 
     symbol_table_t *tables[] = {global, first_local, second_local};
 
@@ -194,15 +194,15 @@ void test_resolve_native_functions() {
 }
 
 void test_resolve_free() {
-    symbol_table_t *global = symbol_table_make(NULL);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
     symbol_table_define(global, "a", true);
     symbol_table_define(global, "b", true);
 
-    symbol_table_t *first_local = symbol_table_make(global);
+    symbol_table_t *first_local = symbol_table_make(NULL, global);
     symbol_table_define(first_local, "c", true);
     symbol_table_define(first_local, "d", true);
 
-    symbol_table_t *second_local = symbol_table_make(first_local);
+    symbol_table_t *second_local = symbol_table_make(NULL, first_local);
     symbol_table_define(second_local, "e", true);
     symbol_table_define(second_local, "f", true);
 
@@ -217,10 +217,10 @@ void test_resolve_free() {
             first_local,
             4,
             {
-                symbol_make("a", SYMBOL_GLOBAL, 0, true),
-                symbol_make("b", SYMBOL_GLOBAL, 1, true),
-                symbol_make("c", SYMBOL_LOCAL, 0, true),
-                symbol_make("d", SYMBOL_LOCAL, 1, true),
+                symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+                symbol_make(NULL, "b", SYMBOL_GLOBAL, 1, true),
+                symbol_make(NULL, "c", SYMBOL_LOCAL, 0, true),
+                symbol_make(NULL, "d", SYMBOL_LOCAL, 1, true),
             },
             0,
             {0},
@@ -229,17 +229,17 @@ void test_resolve_free() {
             second_local,
             4,
             {
-                symbol_make("a", SYMBOL_GLOBAL, 0, true),
-                symbol_make("b", SYMBOL_GLOBAL, 1, true),
-                symbol_make("c", SYMBOL_FREE, 0, true),
-                symbol_make("d", SYMBOL_FREE, 1, true),
-                symbol_make("e", SYMBOL_LOCAL, 0, true),
-                symbol_make("f", SYMBOL_LOCAL, 1, true),
+                symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+                symbol_make(NULL, "b", SYMBOL_GLOBAL, 1, true),
+                symbol_make(NULL, "c", SYMBOL_FREE, 0, true),
+                symbol_make(NULL, "d", SYMBOL_FREE, 1, true),
+                symbol_make(NULL, "e", SYMBOL_LOCAL, 0, true),
+                symbol_make(NULL, "f", SYMBOL_LOCAL, 1, true),
             },
             2,
             {
-                symbol_make("c", SYMBOL_LOCAL, 0, true),
-                symbol_make("d", SYMBOL_LOCAL, 1, true),
+                symbol_make(NULL, "c", SYMBOL_LOCAL, 0, true),
+                symbol_make(NULL, "d", SYMBOL_LOCAL, 1, true),
             },
         },
     };
@@ -270,21 +270,21 @@ void test_resolve_free() {
 }
 
 void test_resolve_unresolvable_free() {
-    symbol_table_t *global = symbol_table_make(NULL);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
     symbol_table_define(global, "a", true);
 
-    symbol_table_t *first_local = symbol_table_make(global);
+    symbol_table_t *first_local = symbol_table_make(NULL, global);
     symbol_table_define(first_local, "c", true);
 
-    symbol_table_t *second_local = symbol_table_make(first_local);
+    symbol_table_t *second_local = symbol_table_make(NULL, first_local);
     symbol_table_define(second_local, "e", true);
     symbol_table_define(second_local, "f", true);
 
     symbol_t *expected[] = {
-        symbol_make("a", SYMBOL_GLOBAL, 0, true),
-        symbol_make("c", SYMBOL_FREE, 0, true),
-        symbol_make("e", SYMBOL_LOCAL, 0, true),
-        symbol_make("f", SYMBOL_LOCAL, 1, true),
+        symbol_make(NULL, "a", SYMBOL_GLOBAL, 0, true),
+        symbol_make(NULL, "c", SYMBOL_FREE, 0, true),
+        symbol_make(NULL, "e", SYMBOL_LOCAL, 0, true),
+        symbol_make(NULL, "f", SYMBOL_LOCAL, 1, true),
     };
 
     for (int i = 0; i < APE_ARRAY_LEN(expected); i++) {
@@ -306,7 +306,7 @@ void test_resolve_unresolvable_free() {
 }
 
 void test_define_and_resolve_function_name() {
-    symbol_table_t *global = symbol_table_make(NULL);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
     symbol_table_define_function_name(global, "a", true);
 
     symbol_t *symbol = symbol_table_resolve(global, "a");
@@ -317,7 +317,7 @@ void test_define_and_resolve_function_name() {
 }
 
 void test_shadowing_function_name() {
-    symbol_table_t *global = symbol_table_make(NULL);
+    symbol_table_t *global = symbol_table_make(NULL, NULL);
     symbol_table_define_function_name(global, "a", true);
     symbol_table_define(global, "a", true);
 
