@@ -20,7 +20,7 @@ void lexer_test() {
     puts("### Lexer test");
     test_lexing();
     test_token_positions();
-
+    puts("\tOK");
 }
 
 static void test_lexing() {

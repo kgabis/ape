@@ -13,11 +13,19 @@ cp -r *.c *h files/* ${dir}
 echo "    OK"
 
 cd ${dir}
-echo "Compiling tests"
-flags="-Wall -Wextra -pedantic-errors -Werror"
-gcc ${flags} -DAPE_TESTS_MAIN *.c -o tests -lm
-echo "    OK"
 
-echo "Running tests"
-./tests
-echo "    OK"
+function compile_and_run {
+    extra_flags=$1
+    echo "Compiling tests (${extra_flags})"
+    flags="-Wall -Wextra -pedantic-errors -Werror"
+    gcc ${flags} ${extra_flags} -DAPE_TESTS_MAIN *.c -o tests -lm
+    echo "    OK"
+
+    echo "Running tests (${extra_flags})"
+    ./tests
+    echo "    OK"
+}
+
+compile_and_run ""
+
+compile_and_run "-g -DAPE_DEBUG -DCOLLECTIONS_DEBUG"

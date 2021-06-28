@@ -23,3 +23,5 @@ recover (e) { return }
 fn() { return fn() { recover (e) { return crash() } return crash() }() }()
 var this = ""
 append([], 1,)
+while (false) { var f = fn() { break; } }
+var len = 2;

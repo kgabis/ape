@@ -21,6 +21,7 @@ void code_test() {
     test_code_make();
     test_read_operands();
     test_instr_strings();
+    puts("\tOK");
 }
 
 static void test_code_make() {

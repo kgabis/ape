@@ -44,15 +44,15 @@ fn mergeSort(arr) {
     return merge(mergeSort(splitted.left), mergeSort(splitted.right))
 }
 
-var len = 1<<18
+var arr_len = 1<<18
 var arr = []
-for (var i = 0; i < len; i += 1) {
+for (var i = 0; i < arr_len; i += 1) {
     var num = floor(random())
     append(arr, num)
 }
 
 var sorted = mergeSort(arr)
 
-for (var i = 0; i < len - 1; i += 1) {
+for (var i = 0; i < arr_len - 1; i += 1) {
     assert(sorted[i] <= sorted[i + 1])
 }

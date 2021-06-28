@@ -68,6 +68,7 @@ void vm_test() {
     test_for_loops();
     test_code_blocks();
     test_errors();
+    puts("\tOK");
 }
 
 // INTERNAL
@@ -81,19 +82,28 @@ static object_t execute(const char *input, bool must_succeed) {
 
     gcmem_t *mem = gcmem_make(NULL);
 
-    compiler_t *comp = compiler_make(NULL, &config, mem, ptrarray_make(NULL));
+    errors_t errors;
+    errors_init(&errors);
+    ptrarray(compiled_file_t) *files = ptrarray_make(NULL);
+    global_store_t *gs = global_store_make(NULL, mem);
+    compiler_t *comp = compiler_make(NULL, &config, mem, &errors, files, gs);
 
     compilation_result_t *comp_res = compiler_compile(comp, input);
-    if (!comp_res || ptrarray_count(comp->errors) > 0) {
-        print_errors(comp->errors);
+    if (!comp_res || errors_has_errors(&errors)) {
+        print_errors(&errors);
         assert(false); // can only fail on vm_run
     }
 
-    vm_t *vm = vm_make(NULL, NULL, mem, ptrarray_make(NULL));
-    ok = vm_run(vm, comp_res, comp->constants);
+    errors_t errs;
+    errors_init(&errs);
+
+    global_store_t *store = global_store_make(NULL, mem);
+
+    vm_t *vm = vm_make(NULL, NULL, mem, &errs, store);
+    ok = vm_run(vm, comp_res, compiler_get_constants(comp));
     assert(vm->sp == 0);
 
-    if (!ok || vm_has_errors(vm)) {
+    if (!ok || errors_has_errors(&errs)) {
         if (!must_succeed) {
             return object_make_null();
         }
@@ -1039,20 +1049,26 @@ static void test_errors() {
 
         ape_config_t *config = malloc(sizeof(ape_config_t));
         config->repl_mode = true;
-        compiler_t *comp = compiler_make(NULL, config, mem, ptrarray_make(NULL));
+        errors_t errs;
+        errors_init(&errs);
+        ptrarray(compiled_file_t) *files = ptrarray_make(NULL);
+        global_store_t *gs = global_store_make(NULL, mem);
+        compiler_t *comp = compiler_make(NULL, config, mem, &errs, files, gs);
 
         compilation_result_t *comp_res = compiler_compile(comp, test.input);
-        if (!comp_res || ptrarray_count(comp->errors) > 0) {
-            print_errors(comp->errors);
+        if (!comp_res || errors_has_errors(&errs)) {
+            print_errors(&errs);
             assert(false); // can only fail on vm_run
         }
 
-        vm_t *vm = vm_make(NULL, NULL, mem, ptrarray_make(NULL));
-        ok = vm_run(vm, comp_res, comp->constants);
+        global_store_t *store = global_store_make(NULL, mem);
+        
+        vm_t *vm = vm_make(NULL, NULL, mem, &errs, store);
+        ok = vm_run(vm, comp_res, compiler_get_constants(comp));
 
         assert(!ok);
-        assert(ptrarray_count(vm->errors) == 1);
-        error_t *err = ptrarray_get(vm->errors, 0);
+        assert(errors_get_count(&errs) == 1);
+        error_t *err = errors_get(&errs, 0);
         assert(err->type == ERROR_RUNTIME);
         assert(err->pos.line == test.line);
         assert(err->pos.column == test.column);

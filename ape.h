@@ -44,10 +44,10 @@ extern "C"
 #endif
 
 #define APE_VERSION_MAJOR 0
-#define APE_VERSION_MINOR 9
+#define APE_VERSION_MINOR 10
 #define APE_VERSION_PATCH 0
 
-#define APE_VERSION_STRING "0.9.0"
+#define APE_VERSION_STRING "0.10.0"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;
@@ -132,6 +132,7 @@ void ape_set_runtime_error(ape_t *ape, const char *message);
 void ape_set_runtime_errorf(ape_t *ape, const char *format, ...) __attribute__ ((format (printf, 2, 3)));
 bool ape_has_errors(const ape_t *ape);
 int  ape_errors_count(const ape_t *ape);
+void ape_clear_errors(ape_t *ape);
 const ape_error_t* ape_get_error(const ape_t *ape, int index);
 
 bool ape_set_native_function(ape_t *ape, const char *name, ape_native_fn fn, void *data);
@@ -166,10 +167,12 @@ ape_object_t ape_object_make_external(ape_t *ape, void *data);
 
 char* ape_object_serialize(ape_t *ape, ape_object_t obj);
 
-void ape_object_disable_gc(ape_object_t obj);
+bool ape_object_disable_gc(ape_object_t obj);
 void ape_object_enable_gc(ape_object_t obj);
 
 bool ape_object_equals(ape_object_t a, ape_object_t b);
+
+bool ape_object_is_null(ape_object_t obj);
 
 ape_object_t ape_object_copy(ape_object_t obj);
 ape_object_t ape_object_deep_copy(ape_object_t obj);

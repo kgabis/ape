@@ -2,6 +2,10 @@ import "module_b"
 
 import "module_dir/module_c"
 
+{
+    var block_scope_var = 2;
+}
+
 assert(true) // testing if builtins are resolvable
 
 fn inc() {
@@ -11,3 +15,9 @@ fn inc() {
 fn add(a, b) {
     return a + b
 }
+
+// User's native functions should be visible from modules
+const squared = square_array(1, 2, 3)
+assert(squared[0] == 1)
+assert(squared[1] == 4)
+assert(squared[2] == 9)

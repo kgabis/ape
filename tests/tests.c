@@ -32,10 +32,10 @@ int tests_main() {
     return 0;
 }
 
-void print_errors(ptrarray(error_t) *errors) {
-    int count = ptrarray_count(errors);
+void print_errors(errors_t *errors) {
+    int count = errors_get_count(errors);
     for (int i = 0; i < count; i++) {
-        const error_t *err = ptrarray_get(errors, i);
+        const error_t *err = errors_get(errors, i);
         int line_num = err->pos.line;
         int col_num = err->pos.column;
         error_type_t type = err->type;

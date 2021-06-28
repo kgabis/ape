@@ -12,7 +12,7 @@
 
 #include "parser.h"
 #include "common.h"
-#include "error.h"
+#include "errors.h"
 
 #include "tests.h"
 
@@ -76,17 +76,20 @@ void parser_test() {
     test_for_loop();
     test_logical_expressions();
     test_recover_statement();
+    puts("\tOK");
 }
 
 // INTERNAL
 static ptrarray(statement_t)* parse(const char *code) {
     ape_config_t *config = malloc(sizeof(ape_config_t));
     config->repl_mode = true;
-    parser_t *parser = parser_make(NULL, config, ptrarray_make(NULL));
+    errors_t errs;
+    errors_init(&errs);
+    parser_t *parser = parser_make(NULL, config, &errs);
 
     ptrarray(statement_t)* statements = parser_parse_all(parser, code, NULL);
 
-    if (!statements || ptrarray_count(parser->errors) > 0) {
+    if (!statements || errors_has_errors(&errs)) {
         print_errors(parser->errors);
         assert(false);
     }
@@ -97,13 +100,13 @@ static ptrarray(statement_t)* parse(const char *code) {
 }
 
 static void check_parser_errors(parser_t *parser) {
-    int errors_len = ptrarray_count(parser->errors);
+    int errors_len = errors_get_count(parser->errors);
     if (errors_len == 0) {
         return;
     }
     printf("Parser has %d errors\n", errors_len);
     for (int i = 0 ; i < errors_len; i++) {
-        error_t *error = ptrarray_get(parser->errors, i);
+        error_t *error = errors_get(parser->errors, i);
         printf("Parser error: %s\n", error->message);
     }
     assert(false);

@@ -2,9 +2,9 @@
 #define tests_h
 
 #include "collections.h"
-#include "error.h"
+#include "errors.h"
 
-void print_errors(ptrarray(error_t) *errors);
+void print_errors(errors_t *errors);
 ptrarray(char)* get_lines(const char *code);
 
 #ifdef APE_TESTS_MAIN

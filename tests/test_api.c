@@ -16,6 +16,14 @@
 
 #include "tests.h"
 
+typedef struct failing_alloc {
+    int allocation_to_fail;
+    int alloc_count;
+    int total_count;
+    bool has_failed;
+    bool should_fail;
+} failing_alloc_t;
+
 static void test_repl(void);
 static void test_program(void);
 static void test_compiling(void);
@@ -61,6 +69,7 @@ void api_test() {
     test_various();
     test_time_limit();
     test_allocation_fails();
+    puts("\tOK");
 }
 
 // INTERNAL
@@ -458,30 +467,76 @@ static void test_time_limit() {
 }
 
 static void test_allocation_fails() {
-    bool malloc_should_fail = false;
-    ape_t *ape = ape_make_ex(failing_malloc, failing_free, &malloc_should_fail);
-    assert(ape);
-    malloc_should_fail = true;
-    ape_execute(ape, "println(\"\")");
+    int n = 0;
+    while (true) {
+//        printf("Failing at allocation %d\n", n);
+        failing_alloc_t failing_alloc = {
+            .allocation_to_fail = n,
+            .alloc_count = 0,
+            .total_count = 0,
+            .has_failed = false,
+            .should_fail = true,
+        };
+        n++;
 
-    assert(ape_has_errors(ape));
-    assert(ape_errors_count(ape) == 1);
+        ape_t *ape = ape_make_ex(failing_malloc, failing_free, &failing_alloc);
+        if (!ape) {
+            assert(failing_alloc.alloc_count == 0);
+            continue;
+        }
 
-    const ape_error_t *err = ape_get_error(ape, 0);
+        ape_set_stdout_write_function(ape, stdout_write, NULL);
 
-    assert(ape_error_get_type(err) == APE_ERROR_ALLOCATION);
-    ape_destroy(ape);
+        ape_set_native_function(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
+        ape_set_global_constant(ape, "test", ape_object_make_number(42));
+        ape_set_native_function(ape, "square_array", square_array_fun, NULL);
+        ape_set_native_function(ape, "make_test_dict", make_test_dict_fun, NULL);
+        ape_set_native_function(ape, "test_check_args", test_check_args_fun, NULL);
+        ape_set_native_function(ape, "vec2_add", vec2_add_fun, NULL);
+        ape_set_native_function(ape, "vec2_sub", vec2_sub_fun, NULL);
+
+        ape_execute_file(ape, "program.bn");
+
+        if (failing_alloc.has_failed) {
+            assert(ape_has_errors(ape));
+            const ape_error_t *err = ape_get_error(ape, 0);
+            assert(ape_error_get_type(err) == APE_ERROR_ALLOCATION);
+
+            failing_alloc.should_fail = false;
+
+            ape_execute(ape, "println(\"hello world\")");
+            assert(!ape_has_errors(ape));
+        }
+
+        ape_destroy(ape);
+
+        assert(failing_alloc.alloc_count == 0);
+
+        if (!failing_alloc.has_failed) {
+            break;
+        }
+    }
 }
 
 static void *failing_malloc(void *ctx, size_t size) {
-    bool *fail = (bool*)ctx;
-    if (*fail) {
+    failing_alloc_t *alloc = (failing_alloc_t*)ctx;
+    if (alloc->should_fail && alloc->total_count >= alloc->allocation_to_fail) {
+        alloc->has_failed = true;
         return NULL;
     }
-    return malloc(size);
+    void *res = malloc(size);
+    if (res != NULL) {
+        alloc->total_count++;
+        alloc->alloc_count++;
+    }
+    return res;
 }
 
 static void failing_free(void *ctx, void *ptr) {
+    failing_alloc_t *alloc = (failing_alloc_t*)ctx;
+    if (ptr != NULL) {
+        alloc->alloc_count--;
+    }
     free(ptr);
 }
 
@@ -558,6 +613,9 @@ static ape_object_t external_fn_test(ape_t *ape, void *data, int argc, ape_objec
 
 static ape_object_t square_array_fun(ape_t *ape, void *data, int argc, ape_object_t *args) {
     ape_object_t res = ape_object_make_array(ape);
+    if (ape_object_get_type(res) == APE_OBJECT_NULL) {
+        return ape_object_make_null();
+    }
     for (int i = 0; i < argc; i++) {
         if (ape_object_get_type(args[i]) != APE_OBJECT_NUMBER) {
             ape_set_runtime_error(ape, "Invalid type passed to square_array");
@@ -585,6 +643,9 @@ static ape_object_t make_test_dict_fun(ape_t *ape, void *data, int argc, ape_obj
     int num_items = ape_object_get_number(args[0]);
 
     ape_object_t res = ape_object_make_map(ape);
+    if (ape_object_get_type(res) == APE_OBJECT_NULL) {
+        return ape_object_make_null();
+    }
     for (int i = 0; i < num_items; i++) {
         char *key_name = ape_stringf(NULL, "%d", i);
         ape_object_t key = ape_object_make_string(ape, key_name);
@@ -645,6 +706,9 @@ static ape_object_t vec2_add_fun(ape_t *ape, void *data, int argc, ape_object_t 
     double b_y = ape_object_get_map_number(args[1], "y");
 
     ape_object_t res = ape_object_make_map(ape);
+    if (ape_object_get_type(res) == APE_OBJECT_NULL) {
+        return res;
+    }
     ape_object_set_map_number(res, "x", a_x + b_x);
     ape_object_set_map_number(res, "y", a_y + b_y);
     return res;
