@@ -20,11 +20,11 @@ int main(int argc, char *argv[]) {
 #else
     int benchmarks_main() {
         const char *tests[] = {
-            "mergesort.bn",
-            "raytracer_profile.bn",
-            "raytracer_profile_optimised.bn",
-            "primes.bn",
-            "fibonacci.bn",
+            "mergesort.ape",
+            "raytracer_profile.ape",
+            "raytracer_profile_optimised.ape",
+            "primes.ape",
+            "fibonacci.ape",
         };
         int tests_len = ARRAY_LEN(tests);
 #endif

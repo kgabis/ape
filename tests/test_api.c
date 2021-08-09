@@ -74,7 +74,7 @@ void api_test() {
 
 // INTERNAL
 static void test_repl() {
-    const char *filename = "repl_inputs.bn";
+    const char *filename = "repl_inputs.ape";
     char *inputs = read_file(filename);
     assert(inputs);
     ptrarray(char) *lines = get_lines(inputs);
@@ -118,7 +118,7 @@ static void test_program() {
     ape_set_native_function(ape, "vec2_add", vec2_add_fun, NULL);
     ape_set_native_function(ape, "vec2_sub", vec2_sub_fun, NULL);
 
-    ape_execute_file(ape, "program.bn");
+    ape_execute_file(ape, "program.ape");
     if (ape_has_errors(ape)) {
         print_ape_errors(ape);
         assert(false);
@@ -135,7 +135,7 @@ static void test_program() {
 static void test_compiling() {
     g_external_fn_test = 0;
     int malloc_count = 0;
-    char *code = read_file("program.bn");
+    char *code = read_file("program.ape");
     assert(code);
 
     ape_t *ape = ape_make_ex(counted_malloc, counted_free, &malloc_count);
@@ -175,7 +175,7 @@ static void test_compiling() {
 }
 
 static void test_fails() {
-    const char *filename = "fails.bn";
+    const char *filename = "fails.ape";
     char *fails = read_file(filename);
     assert(fails);
     ptrarray(char) *lines = get_lines(fails);
@@ -294,7 +294,7 @@ static void test_calling_functions() {
 }
 
 static void test_traceback() {
-    char *program = read_file("tracebacks.bn");
+    char *program = read_file("tracebacks.ape");
     assert(program);
 
     int malloc_count = 0;
@@ -495,7 +495,7 @@ static void test_allocation_fails() {
         ape_set_native_function(ape, "vec2_add", vec2_add_fun, NULL);
         ape_set_native_function(ape, "vec2_sub", vec2_sub_fun, NULL);
 
-        ape_execute_file(ape, "program.bn");
+        ape_execute_file(ape, "program.ape");
 
         if (failing_alloc.has_failed) {
             assert(ape_has_errors(ape));

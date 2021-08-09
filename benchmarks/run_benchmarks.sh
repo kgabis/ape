@@ -7,8 +7,7 @@ echo "Temp dir: ${dir}"
 
 echo "Copying files"
 cp ../ape.h ../ape.c ${dir}
-
-cp *.c files/*.bn ${dir}
+cp *.c files/*.ape ${dir}
 echo "    OK"
 
 cd ${dir}
@@ -17,9 +16,9 @@ gcc -O3 -DAPE_BENCHMARKS_MAIN *.c -o benchmarks -lm
 echo "    OK"
 
 echo "Running benchmarks"
-./benchmarks mergesort.bn
-./benchmarks raytracer_profile.bn
-./benchmarks raytracer_profile_optimised.bn
-./benchmarks primes.bn
-./benchmarks fibonacci.bn
+./benchmarks mergesort.ape
+./benchmarks raytracer_profile.ape
+./benchmarks raytracer_profile_optimised.ape
+./benchmarks primes.ape
+./benchmarks fibonacci.ape
 echo "    OK"

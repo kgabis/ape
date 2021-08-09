@@ -2588,7 +2588,6 @@ array_t_* array_copy(const array_t_ *arr) {
     return copy;
 }
 
-
 bool array_add(array_t_ *arr, const void *value) {
     if (arr->count >= arr->capacity) {
         COLLECTIONS_ASSERT(!arr->lock_capacity);
@@ -8138,9 +8137,9 @@ static bool import_module(compiler_t *comp, const statement_t *import_stmt) { //
         goto end;
     }
     if (kg_is_path_absolute(module_path)) {
-        strbuf_appendf(filepath_buf, "%s.bn", module_path);
+        strbuf_appendf(filepath_buf, "%s.ape", module_path);
     } else {
-        strbuf_appendf(filepath_buf, "%s%s.bn", file_scope->file->dir_path, module_path);
+        strbuf_appendf(filepath_buf, "%s%s.ape", file_scope->file->dir_path, module_path);
     }
 
     if (strbuf_failed(filepath_buf)) {
@@ -13238,14 +13237,14 @@ static bool call_object(vm_t *vm, object_t callee, int num_args) {
 }
 
 static object_t call_native_function(vm_t *vm, object_t callee, src_pos_t src_pos, int argc, object_t *args) {
-    native_function_t *bn = object_get_native_function(callee);
-    object_t res = bn->fn(vm, bn->data, argc, args);
-    if (errors_has_errors(vm->errors) && !APE_STREQ(bn->name, "crash")) {
+    native_function_t *native_fun = object_get_native_function(callee);
+    object_t res = native_fun->fn(vm, native_fun->data, argc, args);
+    if (errors_has_errors(vm->errors) && !APE_STREQ(native_fun->name, "crash")) {
         error_t *err = errors_get_last_error(vm->errors);
         err->pos = src_pos;
         err->traceback = traceback_make(vm->alloc);
         if (err->traceback) {
-            traceback_append(err->traceback, bn->name, src_pos_invalid);
+            traceback_append(err->traceback, native_fun->name, src_pos_invalid);
         }
         return object_make_null();
     }
@@ -13254,8 +13253,8 @@ static object_t call_native_function(vm_t *vm, object_t callee, src_pos_t src_po
         traceback_t *traceback = traceback_make(vm->alloc);
         if (traceback) {
             // error builtin is treated in a special way
-            if (!APE_STREQ(bn->name, "error")) {
-                traceback_append(traceback, bn->name, src_pos_invalid);
+            if (!APE_STREQ(native_fun->name, "error")) {
+                traceback_append(traceback, native_fun->name, src_pos_invalid);
             }
             traceback_append_from_vm(traceback, vm);
             object_set_error_traceback(res, traceback);
@@ -13331,7 +13330,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 10
+#define APE_IMPL_VERSION_MINOR 11
 #define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
