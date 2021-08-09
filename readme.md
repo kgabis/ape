@@ -161,11 +161,11 @@ fn() {
 
 ### Modules
 ```javascript
-import "foo" // import "foo.bn" and load global symbols prefixed with foo::
+import "foo" // import "foo.ape" and load global symbols prefixed with foo::
 
 foo::bar()
 
-import "bar/baz" // import "bar/baz.bn" and load global symbols prefixed with baz::
+import "bar/baz" // import "bar/baz.ape" and load global symbols prefixed with baz::
 baz::foo()
 ```
 

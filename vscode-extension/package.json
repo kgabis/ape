@@ -2,7 +2,7 @@
     "name": "apelang",
     "displayName": "apelang",
     "description": "ape language support",
-    "version": "0.1.2",
+    "version": "0.2.0",
     "publisher": "KrzysztofGabis",
     "icon": "images/logo.png",
     "engines": {
