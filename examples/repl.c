@@ -27,7 +27,6 @@ void repl_start() {
     ape_set_timeout(ape, 1.0);
 
     ape_set_native_function(ape, "exit", exit_repl, &exit);
-    ape_set_global_constant(ape, "test", ape_object_make_number(123));
 
     while (!exit) {
         printf("%s", PROMPT);

@@ -518,6 +518,7 @@ typedef enum {
     TOKEN_IDENT,
     TOKEN_NUMBER,
     TOKEN_STRING,
+    TOKEN_TEMPLATE_STRING,
 
     TOKEN_TYPE_MAX
 } token_type_t;
@@ -572,8 +573,11 @@ APE_INTERNAL void compiled_file_destroy(compiled_file_t *file);
 #include "compiled_file.h"
 #endif
 
+typedef struct errors errors_t;
+
 typedef struct lexer {
     allocator_t *alloc;
+    errors_t *errors;
     const char *input;
     int input_len;
     int position;
@@ -583,12 +587,29 @@ typedef struct lexer {
     int column;
     compiled_file_t *file;
     bool failed;
+    bool continue_template_string;
+    struct {
+        int position;
+        int next_position;
+        char ch;
+        int line;
+        int column;
+    } prev_token_state;
+    token_t prev_token;
+    token_t cur_token;
+    token_t peek_token;
 } lexer_t;
 
-APE_INTERNAL bool lexer_init(lexer_t *lex, allocator_t *alloc, const char *input, compiled_file_t *file); // no need to deinit
+APE_INTERNAL bool lexer_init(lexer_t *lex, allocator_t *alloc, errors_t *errs, const char *input, compiled_file_t *file); // no need to deinit
 
-APE_INTERNAL token_t lexer_next_token(lexer_t *lex);
 APE_INTERNAL bool lexer_failed(lexer_t *lex);
+APE_INTERNAL void lexer_continue_template_string(lexer_t *lex);
+APE_INTERNAL bool lexer_cur_token_is(lexer_t *lex, token_type_t type);
+APE_INTERNAL bool lexer_peek_token_is(lexer_t *lex, token_type_t type);
+APE_INTERNAL bool lexer_next_token(lexer_t *lex);
+APE_INTERNAL bool lexer_previous_token(lexer_t *lex);
+APE_INTERNAL token_t lexer_next_token_internal(lexer_t *lex); // exposed here for tests
+APE_INTERNAL bool lexer_expect_current(lexer_t *lex, token_type_t type);
 
 #endif /* lexer_h */
 //FILE_END
@@ -882,8 +903,6 @@ typedef struct parser {
     allocator_t *alloc;
     const ape_config_t *config;
     lexer_t lexer;
-    token_t cur_token;
-    token_t peek_token;
     errors_t *errors;
     
     prefix_parse_fn prefix_parse_fns[TOKEN_TYPE_MAX];
@@ -3475,6 +3494,7 @@ static const char *g_type_names[] = {
     "IDENT",
     "NUMBER",
     "STRING",
+    "TEMPLATE_STRING",
 };
 
 void token_init(token_t *tok, token_type_t type, const char *literal, int len) {
@@ -3558,13 +3578,14 @@ static bool is_digit(char ch);
 static bool is_one_of(char ch, const char* allowed, int allowed_len);
 static const char* read_identifier(lexer_t *lex, int *out_len);
 static const char* read_number(lexer_t *lex, int *out_len);
-static const char* read_string(lexer_t *lex, char delimiter, int *out_len);
+static const char* read_string(lexer_t *lex, char delimiter, bool is_template, bool *out_template_found, int *out_len);
 static token_type_t lookup_identifier(const char *ident, int len);
 static void skip_whitespace(lexer_t *lex);
 static bool add_line(lexer_t *lex, int offset);
 
-bool lexer_init(lexer_t *lex, allocator_t *alloc, const char *input, compiled_file_t *file) {
+bool lexer_init(lexer_t *lex, allocator_t *alloc, errors_t *errs, const char *input, compiled_file_t *file) {
     lex->alloc = alloc;
+    lex->errors = errs;
     lex->input = input;
     lex->input_len = (int)strlen(input);
     lex->position = 0;
@@ -3586,20 +3607,76 @@ bool lexer_init(lexer_t *lex, allocator_t *alloc, const char *input, compiled_fi
         return false;
     }
     lex->failed = false;
+    lex->continue_template_string = false;
+
+    memset(&lex->prev_token_state, 0, sizeof(lex->prev_token_state));
+    token_init(&lex->prev_token, TOKEN_INVALID, NULL, 0);
+    token_init(&lex->cur_token, TOKEN_INVALID, NULL, 0);
+    token_init(&lex->peek_token, TOKEN_INVALID, NULL, 0);
+
     return true;
 }
 
-token_t lexer_next_token(lexer_t *lex) { 
+bool lexer_failed(lexer_t *lex) {
+    return lex->failed;
+}
+
+void lexer_continue_template_string(lexer_t *lex) {
+    lex->continue_template_string = true;
+}
+
+bool lexer_cur_token_is(lexer_t *lex, token_type_t type) {
+    return lex->cur_token.type == type;
+}
+
+bool lexer_peek_token_is(lexer_t *lex, token_type_t type) {
+    return lex->peek_token.type == type;
+}
+
+bool lexer_next_token(lexer_t *lex) {
+    lex->prev_token = lex->cur_token;
+    lex->cur_token = lex->peek_token;
+    lex->peek_token = lexer_next_token_internal(lex);
+    return !lex->failed;
+}
+
+bool lexer_previous_token(lexer_t *lex) {
+    if (lex->prev_token.type == TOKEN_INVALID) {
+        return false;
+    }
+
+    lex->peek_token = lex->cur_token;
+    lex->cur_token = lex->prev_token;
+    token_init(&lex->prev_token, TOKEN_INVALID, NULL, 0);
+
+    lex->ch = lex->prev_token_state.ch;
+    lex->column = lex->prev_token_state.column;
+    lex->line = lex->prev_token_state.line;
+    lex->position = lex->prev_token_state.position;
+    lex->next_position = lex->prev_token_state.next_position;
+
+    return true;
+}
+
+token_t lexer_next_token_internal(lexer_t *lex) {
+    lex->prev_token_state.ch = lex->ch;
+    lex->prev_token_state.column = lex->column;
+    lex->prev_token_state.line = lex->line;
+    lex->prev_token_state.position = lex->position;
+    lex->prev_token_state.next_position = lex->next_position;
+
     while (true) {
         skip_whitespace(lex);
-        
+
         token_t out_tok;
         out_tok.type = TOKEN_INVALID;
         out_tok.literal = lex->input + lex->position;
         out_tok.len = 1;
         out_tok.pos = src_pos_make(lex->file, lex->line, lex->column);
 
-        switch (lex->ch) {
+        char c = lex->continue_template_string ? '`' : lex->ch;
+
+        switch (c) {
             case '\0': token_init(&out_tok, TOKEN_EOF, "EOF", 3); break;
             case '=': {
                 if (peek_char(lex) == '=') {
@@ -3748,8 +3825,9 @@ token_t lexer_next_token(lexer_t *lex) {
                 break;
             }
             case '"': {
+                read_char(lex);
                 int len;
-                const char *str = read_string(lex, '"', &len);
+                const char *str = read_string(lex, '"', false, NULL, &len);
                 if (str) {
                     token_init(&out_tok, TOKEN_STRING, str, len);
                 } else {
@@ -3758,10 +3836,29 @@ token_t lexer_next_token(lexer_t *lex) {
                 break;
             }
             case '\'': {
+                read_char(lex);
                 int len;
-                const char *str = read_string(lex, '\'', &len);
+                const char *str = read_string(lex, '\'', false, NULL, &len);
                 if (str) {
                     token_init(&out_tok, TOKEN_STRING, str, len);
+                } else {
+                    token_init(&out_tok, TOKEN_INVALID, NULL, 0);
+                }
+                break;
+            }
+            case '`': {
+                if (!lex->continue_template_string) {
+                    read_char(lex);
+                }
+                int len;
+                bool template_found = false;
+                const char *str = read_string(lex, '`', true, &template_found, &len);
+                if (str) {
+                    if (template_found) {
+                        token_init(&out_tok, TOKEN_TEMPLATE_STRING, str, len);
+                    } else {
+                        token_init(&out_tok, TOKEN_STRING, str, len);
+                    }
                 } else {
                     token_init(&out_tok, TOKEN_INVALID, NULL, 0);
                 }
@@ -3787,15 +3884,29 @@ token_t lexer_next_token(lexer_t *lex) {
         if (lexer_failed(lex)) {
             token_init(&out_tok, TOKEN_INVALID, NULL, 0);
         }
+        lex->continue_template_string = false;
         return out_tok;
     }
 }
 
-bool lexer_failed(lexer_t *lex) {
-    return lex->failed;
+bool lexer_expect_current(lexer_t *lex, token_type_t type) {
+    if (lexer_failed(lex)) {
+        return false;
+    }
+
+    if (!lexer_cur_token_is(lex, type)) {
+        const char *expected_type_str = token_type_to_string(type);
+        const char *actual_type_str = token_type_to_string(lex->cur_token.type);
+        errors_add_errorf(lex->errors, ERROR_PARSING, lex->cur_token.pos,
+                          "Expected current token to be \"%s\", got \"%s\" instead",
+                          expected_type_str, actual_type_str);
+        return false;
+    }
+    return true;
 }
 
 // INTERNAL
+
 static bool read_char(lexer_t *lex) {
     if (lex->next_position >= lex->input_len) {
         lex->ch = '\0';
@@ -3873,23 +3984,28 @@ static const char* read_number(lexer_t *lex, int *out_len) {
     return lex->input + position;
 }
 
-static const char* read_string(lexer_t *lex, char delimiter, int *out_len) {
+static const char* read_string(lexer_t *lex, char delimiter, bool is_template, bool *out_template_found, int *out_len) {
     *out_len = 0;
 
     bool escaped = false;
-    int position = lex->position + 1;
+    int position = lex->position;
+
     while (true) {
-        read_char(lex);
         if (lex->ch == '\0') {
             return NULL;
         }
         if (lex->ch == delimiter && !escaped) {
             break;
         }
+        if (is_template && !escaped && lex->ch == '$' && peek_char(lex) == '{') {
+            *out_template_found = true;
+            break;
+        }
         escaped = false;
         if (lex->ch == '\\') {
             escaped = true;
         }
+        read_char(lex);
     }
     int len = lex->position - position;
     *out_len = len;
@@ -3941,6 +4057,11 @@ static bool add_line(lexer_t *lex, int offset) {
     if (!lex->file) {
         return true;
     }
+
+    if (lex->line < ptrarray_count(lex->file->lines)) {
+        return true;
+    }
+
     const char *line_start = lex->input + offset;
     const char *new_line_ptr = strchr(line_start, '\n');
     char *line = NULL;
@@ -5231,9 +5352,9 @@ typedef enum precedence {
     PRECEDENCE_CALL,        // myFunction(X)
     PRECEDENCE_INDEX,       // arr[x]
     PRECEDENCE_DOT,         // obj.foo
+    PRECEDENCE_HIGHEST
 } precedence_t;
 
-static void next_token(parser_t *parser);
 static statement_t* parse_statement(parser_t *p);
 static statement_t* parse_define_statement(parser_t *p);
 static statement_t* parse_if_statement(parser_t *p);
@@ -5257,6 +5378,7 @@ static expression_t* parse_identifier(parser_t *p);
 static expression_t* parse_number_literal(parser_t *p);
 static expression_t* parse_bool_literal(parser_t *p);
 static expression_t* parse_string_literal(parser_t *p);
+static expression_t* parse_template_string_literal(parser_t *p);
 static expression_t* parse_null_literal(parser_t *p);
 static expression_t* parse_array_literal(parser_t *p);
 static expression_t* parse_map_literal(parser_t *p);
@@ -5275,12 +5397,9 @@ static expression_t* parse_logical_expression(parser_t *p, expression_t *left);
 static precedence_t get_precedence(token_type_t tk);
 static operator_t token_to_operator(token_type_t tk);
 
-static bool cur_token_is(parser_t *p, token_type_t type);
-static bool peek_token_is(parser_t *p, token_type_t type);
-static bool expect_current(parser_t *p, token_type_t type);
-
 static char escape_char(const char c);
 static char* process_and_copy_string(allocator_t *alloc, const char *input, size_t len);
+static expression_t* wrap_expression_in_function_call(allocator_t *alloc, expression_t *expr, const char *function_name);
 
 parser_t* parser_make(allocator_t *alloc, const ape_config_t *config, errors_t *errors) {
     parser_t *parser = allocator_malloc(alloc, sizeof(parser_t));
@@ -5298,6 +5417,7 @@ parser_t* parser_make(allocator_t *alloc, const ape_config_t *config, errors_t *
     parser->prefix_parse_fns[TOKEN_TRUE] = parse_bool_literal;
     parser->prefix_parse_fns[TOKEN_FALSE] = parse_bool_literal;
     parser->prefix_parse_fns[TOKEN_STRING] = parse_string_literal;
+    parser->prefix_parse_fns[TOKEN_TEMPLATE_STRING] = parse_template_string_literal;
     parser->prefix_parse_fns[TOKEN_NULL] = parse_null_literal;
     parser->prefix_parse_fns[TOKEN_BANG] = parse_prefix_expression;
     parser->prefix_parse_fns[TOKEN_MINUS] = parse_prefix_expression;
@@ -5354,22 +5474,22 @@ void parser_destroy(parser_t *parser) {
 ptrarray(statement_t)* parser_parse_all(parser_t *parser, const char *input, compiled_file_t *file) {
     parser->depth = 0;
 
-    bool ok = lexer_init(&parser->lexer, parser->alloc, input, file);
+    bool ok = lexer_init(&parser->lexer, parser->alloc, parser->errors, input, file);
     if (!ok) {
         return NULL;
     }
 
-    next_token(parser);
-    next_token(parser);
+    lexer_next_token(&parser->lexer);
+    lexer_next_token(&parser->lexer);
 
     ptrarray(statement_t)* statements = ptrarray_make(parser->alloc);
     if (!statements) {
         return NULL;
     }
 
-    while (!cur_token_is(parser, TOKEN_EOF)) {
-        if (cur_token_is(parser, TOKEN_SEMICOLON)) {
-            next_token(parser);
+    while (!lexer_cur_token_is(&parser->lexer, TOKEN_EOF)) {
+        if (lexer_cur_token_is(&parser->lexer, TOKEN_SEMICOLON)) {
+            lexer_next_token(&parser->lexer);
             continue;
         }
         statement_t *stmt = parse_statement(parser);
@@ -5394,16 +5514,11 @@ err:
 }
 
 // INTERNAL
-static void next_token(parser_t *p) {
-    p->cur_token = p->peek_token;
-    p->peek_token = lexer_next_token(&p->lexer);
-}
-
 static statement_t* parse_statement(parser_t *p) {
-    src_pos_t pos = p->cur_token.pos;
+    src_pos_t pos = p->lexer.cur_token.pos;
 
     statement_t *res = NULL;
-    switch (p->cur_token.type) {
+    switch (p->lexer.cur_token.type) {
         case TOKEN_VAR:
         case TOKEN_CONST: {
             res = parse_define_statement(p);
@@ -5430,7 +5545,7 @@ static statement_t* parse_statement(parser_t *p) {
             break;
         }
         case TOKEN_FUNCTION: {
-            if (peek_token_is(p, TOKEN_IDENT)) {
+            if (lexer_peek_token_is(&p->lexer, TOKEN_IDENT)) {
                 res = parse_function_statement(p);
             } else {
                 res = parse_expression_statement(p);
@@ -5472,26 +5587,26 @@ static statement_t* parse_define_statement(parser_t *p) {
     ident_t *name_ident = NULL;
     expression_t *value = NULL;
 
-    bool assignable = cur_token_is(p, TOKEN_VAR);
+    bool assignable = lexer_cur_token_is(&p->lexer, TOKEN_VAR);
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_IDENT)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_IDENT)) {
         goto err;
     }
 
-    name_ident = ident_make(p->alloc, p->cur_token);
+    name_ident = ident_make(p->alloc, p->lexer.cur_token);
     if (!name_ident) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_ASSIGN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_ASSIGN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     value = parse_expression(p, PRECEDENCE_LOWEST);
     if (!value) {
@@ -5525,13 +5640,13 @@ static statement_t* parse_if_statement(parser_t *p) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_LPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_LPAREN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     if_case_t *cond = if_case_make(p->alloc, NULL, NULL);
     if (!cond) {
@@ -5549,28 +5664,28 @@ static statement_t* parse_if_statement(parser_t *p) {
         goto err;
     }
 
-    if (!expect_current(p, TOKEN_RPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     cond->consequence = parse_code_block(p);
     if (!cond->consequence) {
         goto err;
     }
 
-    while (cur_token_is(p, TOKEN_ELSE)) {
-        next_token(p);
+    while (lexer_cur_token_is(&p->lexer, TOKEN_ELSE)) {
+        lexer_next_token(&p->lexer);
 
-        if (cur_token_is(p, TOKEN_IF)) {
-            next_token(p);
+        if (lexer_cur_token_is(&p->lexer, TOKEN_IF)) {
+            lexer_next_token(&p->lexer);
 
-            if (!expect_current(p, TOKEN_LPAREN)) {
+            if (!lexer_expect_current(&p->lexer, TOKEN_LPAREN)) {
                 goto err;
             }
 
-            next_token(p);
+            lexer_next_token(&p->lexer);
 
             if_case_t *elif = if_case_make(p->alloc, NULL, NULL);
             if (!elif) {
@@ -5588,11 +5703,11 @@ static statement_t* parse_if_statement(parser_t *p) {
                 goto err;
             }
 
-            if (!expect_current(p, TOKEN_RPAREN)) {
+            if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
                 goto err;
             }
 
-            next_token(p);
+            lexer_next_token(&p->lexer);
 
             elif->consequence = parse_code_block(p);
             if (!elif->consequence) {
@@ -5620,9 +5735,9 @@ err:
 static statement_t* parse_return_statement(parser_t *p) {
     expression_t *expr = NULL;
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!cur_token_is(p, TOKEN_SEMICOLON) && !cur_token_is(p, TOKEN_RBRACE) && !cur_token_is(p, TOKEN_EOF)) {
+    if (!lexer_cur_token_is(&p->lexer, TOKEN_SEMICOLON) && !lexer_cur_token_is(&p->lexer, TOKEN_RBRACE) && !lexer_cur_token_is(&p->lexer, TOKEN_EOF)) {
         expr = parse_expression(p, PRECEDENCE_LOWEST);
         if (!expr) {
             return NULL;
@@ -5664,24 +5779,24 @@ static statement_t* parse_while_loop_statement(parser_t *p) {
     expression_t *test = NULL;
     code_block_t *body = NULL;
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_LPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_LPAREN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     test = parse_expression(p, PRECEDENCE_LOWEST);
     if (!test) {
         goto err;
     }
 
-    if (!expect_current(p, TOKEN_RPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     body = parse_code_block(p);
     if (!body) {
@@ -5700,12 +5815,12 @@ err:
 }
 
 static statement_t* parse_break_statement(parser_t *p) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
     return statement_make_break(p->alloc);
 }
 
 static statement_t* parse_continue_statement(parser_t *p) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
     return statement_make_continue(p->alloc);
 }
 
@@ -5723,18 +5838,18 @@ static statement_t* parse_block_statement(parser_t *p) {
 }
 
 static statement_t* parse_import_statement(parser_t *p) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_STRING)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_STRING)) {
         return NULL;
     }
 
-    char *processed_name = process_and_copy_string(p->alloc, p->cur_token.literal, p->cur_token.len);
+    char *processed_name = process_and_copy_string(p->alloc, p->lexer.cur_token.literal, p->lexer.cur_token.len);
     if (!processed_name) {
-        errors_add_error(p->errors, ERROR_PARSING, p->cur_token.pos, "Error when parsing module name");
+        errors_add_error(p->errors, ERROR_PARSING, p->lexer.cur_token.pos, "Error when parsing module name");
         return NULL;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     statement_t *res = statement_make_import(p->alloc, processed_name);
     if (!res) {
@@ -5748,28 +5863,28 @@ static statement_t* parse_recover_statement(parser_t *p) {
     ident_t *error_ident = NULL;
     code_block_t *body = NULL;
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_LPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_LPAREN)) {
         return NULL;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_IDENT)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_IDENT)) {
         return NULL;
     }
 
-    error_ident = ident_make(p->alloc, p->cur_token);
+    error_ident = ident_make(p->alloc, p->lexer.cur_token);
     if (!error_ident) {
         return NULL;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_RPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
         goto err;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     body = parse_code_block(p);
     if (!body) {
@@ -5789,15 +5904,15 @@ err:
 }
 
 static statement_t* parse_for_loop_statement(parser_t *p) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_LPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_LPAREN)) {
         return NULL;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (cur_token_is(p, TOKEN_IDENT) && peek_token_is(p, TOKEN_IN)) {
+    if (lexer_cur_token_is(&p->lexer, TOKEN_IDENT) && lexer_peek_token_is(&p->lexer, TOKEN_IN)) {
         return parse_foreach(p);
     } else {
         return parse_classic_for_loop(p);
@@ -5809,29 +5924,29 @@ static statement_t* parse_foreach(parser_t *p) {
     code_block_t *body = NULL;
     ident_t *iterator_ident = NULL;
 
-    iterator_ident = ident_make(p->alloc, p->cur_token);
+    iterator_ident = ident_make(p->alloc, p->lexer.cur_token);
     if (!iterator_ident) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_IN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_IN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     source = parse_expression(p, PRECEDENCE_LOWEST);
     if (!source) {
         goto err;
     }
 
-    if (!expect_current(p, TOKEN_RPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     body = parse_code_block(p);
     if (!body) {
@@ -5856,7 +5971,7 @@ static statement_t* parse_classic_for_loop(parser_t *p) {
     expression_t *update = NULL;
     code_block_t *body = NULL;
 
-    if (!cur_token_is(p, TOKEN_SEMICOLON)) {
+    if (!lexer_cur_token_is(&p->lexer, TOKEN_SEMICOLON)) {
         init = parse_statement(p);
         if (!init) {
             goto err;
@@ -5866,36 +5981,36 @@ static statement_t* parse_classic_for_loop(parser_t *p) {
                               "for loop's init clause should be a define statement or an expression");
             goto err;
         }
-        if (!expect_current(p, TOKEN_SEMICOLON)) {
+        if (!lexer_expect_current(&p->lexer, TOKEN_SEMICOLON)) {
             goto err;
         }
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!cur_token_is(p, TOKEN_SEMICOLON)) {
+    if (!lexer_cur_token_is(&p->lexer, TOKEN_SEMICOLON)) {
         test = parse_expression(p, PRECEDENCE_LOWEST);
         if (!test) {
             goto err;
         }
-        if (!expect_current(p, TOKEN_SEMICOLON)) {
+        if (!lexer_expect_current(&p->lexer, TOKEN_SEMICOLON)) {
             goto err;
         }
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!cur_token_is(p, TOKEN_RPAREN)) {
+    if (!lexer_cur_token_is(&p->lexer, TOKEN_RPAREN)) {
         update = parse_expression(p, PRECEDENCE_LOWEST);
         if (!update) {
             goto err;
         }
-        if (!expect_current(p, TOKEN_RPAREN)) {
+        if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
             goto err;
         }
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     body = parse_code_block(p);
     if (!body) {
@@ -5920,20 +6035,20 @@ static statement_t* parse_function_statement(parser_t *p) {
     ident_t *name_ident = NULL;
     expression_t* value = NULL;
 
-    src_pos_t pos = p->cur_token.pos;
+    src_pos_t pos = p->lexer.cur_token.pos;
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (!expect_current(p, TOKEN_IDENT)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_IDENT)) {
         goto err;
     }
 
-    name_ident = ident_make(p->alloc, p->cur_token);
+    name_ident = ident_make(p->alloc, p->lexer.cur_token);
     if (!name_ident) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     value = parse_function_literal(p);
     if (!value) {
@@ -5960,11 +6075,11 @@ err:
 }
 
 static code_block_t* parse_code_block(parser_t *p) {
-    if (!expect_current(p, TOKEN_LBRACE)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_LBRACE)) {
         return NULL;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
     p->depth++;
 
     ptrarray(statement_t)* statements = ptrarray_make(p->alloc);
@@ -5972,13 +6087,13 @@ static code_block_t* parse_code_block(parser_t *p) {
         goto err;
     }
 
-    while (!cur_token_is(p, TOKEN_RBRACE)) {
-        if (cur_token_is(p, TOKEN_EOF)) {
-            errors_add_error(p->errors, ERROR_PARSING, p->cur_token.pos, "Unexpected EOF");
+    while (!lexer_cur_token_is(&p->lexer, TOKEN_RBRACE)) {
+        if (lexer_cur_token_is(&p->lexer, TOKEN_EOF)) {
+            errors_add_error(p->errors, ERROR_PARSING, p->lexer.cur_token.pos, "Unexpected EOF");
             goto err;
         }
-        if (cur_token_is(p, TOKEN_SEMICOLON)) {
-            next_token(p);
+        if (lexer_cur_token_is(&p->lexer, TOKEN_SEMICOLON)) {
+            lexer_next_token(&p->lexer);
             continue;
         }
         statement_t *stmt = parse_statement(p);
@@ -5992,7 +6107,7 @@ static code_block_t* parse_code_block(parser_t *p) {
         }
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     p->depth--;
     
@@ -6009,17 +6124,17 @@ err:
 }
 
 static expression_t* parse_expression(parser_t *p, precedence_t prec) {
-    src_pos_t pos = p->cur_token.pos;
+    src_pos_t pos = p->lexer.cur_token.pos;
 
-    if (p->cur_token.type == TOKEN_INVALID) {
-        errors_add_error(p->errors, ERROR_PARSING, p->cur_token.pos, "Illegal token");
+    if (p->lexer.cur_token.type == TOKEN_INVALID) {
+        errors_add_error(p->errors, ERROR_PARSING, p->lexer.cur_token.pos, "Illegal token");
         return NULL;
     }
 
-    prefix_parse_fn prefix = p->prefix_parse_fns[p->cur_token.type];
+    prefix_parse_fn prefix = p->prefix_parse_fns[p->lexer.cur_token.type];
     if (!prefix) {
-        char *literal = token_duplicate_literal(p->alloc, &p->cur_token);
-        errors_add_errorf(p->errors, ERROR_PARSING, p->cur_token.pos,
+        char *literal = token_duplicate_literal(p->alloc, &p->lexer.cur_token);
+        errors_add_errorf(p->errors, ERROR_PARSING, p->lexer.cur_token.pos,
                                   "No prefix parse function for \"%s\" found", literal);
         allocator_free(p->alloc, literal);
         return NULL;
@@ -6031,12 +6146,12 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
     }
     left_expr->pos = pos;
 
-    while (!cur_token_is(p, TOKEN_SEMICOLON) && prec < get_precedence(p->cur_token.type)) {
-        infix_parse_fn infix = p->infix_parse_fns[p->cur_token.type];
+    while (!lexer_cur_token_is(&p->lexer, TOKEN_SEMICOLON) && prec < get_precedence(p->lexer.cur_token.type)) {
+        infix_parse_fn infix = p->infix_parse_fns[p->lexer.cur_token.type];
         if (!infix) {
             return left_expr;
         }
-        pos = p->cur_token.pos;
+        pos = p->lexer.cur_token.pos;
         expression_t *new_left_expr = infix(p, left_expr);
         if (!new_left_expr) {
             expression_destroy(left_expr);
@@ -6050,7 +6165,7 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
 }
 
 static expression_t* parse_identifier(parser_t *p) {
-    ident_t *ident = ident_make(p->alloc, p->cur_token);
+    ident_t *ident = ident_make(p->alloc, p->lexer.cur_token);
     if (!ident) {
         return NULL;
     }
@@ -6059,7 +6174,7 @@ static expression_t* parse_identifier(parser_t *p) {
         ident_destroy(ident);
         return NULL;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
     return res;
 }
 
@@ -6067,32 +6182,32 @@ static expression_t* parse_number_literal(parser_t *p) {
     char *end;
     double number = 0;
     errno = 0;
-    number = strtod(p->cur_token.literal, &end);
-    long parsed_len = end - p->cur_token.literal;
-    if (errno || parsed_len != p->cur_token.len) {
-        char *literal = token_duplicate_literal(p->alloc, &p->cur_token);
-        errors_add_errorf(p->errors, ERROR_PARSING, p->cur_token.pos,
+    number = strtod(p->lexer.cur_token.literal, &end);
+    long parsed_len = end - p->lexer.cur_token.literal;
+    if (errno || parsed_len != p->lexer.cur_token.len) {
+        char *literal = token_duplicate_literal(p->alloc, &p->lexer.cur_token);
+        errors_add_errorf(p->errors, ERROR_PARSING, p->lexer.cur_token.pos,
                           "Parsing number literal \"%s\" failed", literal);
         allocator_free(p->alloc, literal);
         return NULL;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
     return expression_make_number_literal(p->alloc, number);
 }
 
 static expression_t* parse_bool_literal(parser_t *p) {
-    expression_t *res = expression_make_bool_literal(p->alloc, p->cur_token.type == TOKEN_TRUE);
-    next_token(p);
+    expression_t *res = expression_make_bool_literal(p->alloc, p->lexer.cur_token.type == TOKEN_TRUE);
+    lexer_next_token(&p->lexer);
     return res;
 }
 
 static expression_t* parse_string_literal(parser_t *p) {
-    char *processed_literal = process_and_copy_string(p->alloc, p->cur_token.literal, p->cur_token.len);
+    char *processed_literal = process_and_copy_string(p->alloc, p->lexer.cur_token.literal, p->lexer.cur_token.len);
     if (!processed_literal) {
-        errors_add_error(p->errors, ERROR_PARSING, p->cur_token.pos, "Error when parsing string literal");
+        errors_add_error(p->errors, ERROR_PARSING, p->lexer.cur_token.pos, "Error when parsing string literal");
         return NULL;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
     expression_t *res = expression_make_string_literal(p->alloc, processed_literal);
     if (!res) {
         allocator_free(p->alloc, processed_literal);
@@ -6101,8 +6216,95 @@ static expression_t* parse_string_literal(parser_t *p) {
     return res;
 }
 
+static expression_t* parse_template_string_literal(parser_t *p) {
+    char *processed_literal = NULL;
+    expression_t *left_string_expr = NULL;
+    expression_t *template_expr = NULL;
+    expression_t *to_str_call_expr = NULL;
+    expression_t *left_add_expr = NULL;
+    expression_t *right_expr = NULL;
+    expression_t *right_add_expr = NULL;
+
+    processed_literal = process_and_copy_string(p->alloc, p->lexer.cur_token.literal, p->lexer.cur_token.len);
+    if (!processed_literal) {
+        errors_add_error(p->errors, ERROR_PARSING, p->lexer.cur_token.pos, "Error when parsing string literal");
+        return NULL;
+    }
+    lexer_next_token(&p->lexer);
+
+    if (!lexer_expect_current(&p->lexer, TOKEN_LBRACE)) {
+        goto err;
+    }
+    lexer_next_token(&p->lexer);
+
+    src_pos_t pos = p->lexer.cur_token.pos;
+
+    left_string_expr = expression_make_string_literal(p->alloc, processed_literal);
+    if (!left_string_expr) {
+        goto err;
+    }
+    left_string_expr->pos = pos;
+    processed_literal = NULL;
+
+    pos = p->lexer.cur_token.pos;
+    template_expr = parse_expression(p, PRECEDENCE_LOWEST);
+    if (!template_expr) {
+        goto err;
+    }
+    template_expr->pos = pos;
+
+    to_str_call_expr = wrap_expression_in_function_call(p->alloc, template_expr, "to_str");
+    if (!to_str_call_expr) {
+        goto err;
+    }
+    template_expr = NULL;
+
+    left_add_expr = expression_make_infix(p->alloc, OPERATOR_PLUS, left_string_expr, to_str_call_expr);
+    if (!left_add_expr) {
+        goto err;
+    }
+    left_add_expr->pos = pos;
+    left_string_expr = NULL;
+    to_str_call_expr = NULL;
+
+    if (!lexer_expect_current(&p->lexer, TOKEN_RBRACE)) {
+        goto err;
+    }
+    lexer_previous_token(&p->lexer);
+    lexer_continue_template_string(&p->lexer);
+    lexer_next_token(&p->lexer);
+    lexer_next_token(&p->lexer);
+
+    pos = p->lexer.cur_token.pos;
+
+    right_expr = parse_expression(p, PRECEDENCE_HIGHEST);
+    if (!right_expr) {
+        goto err;
+    }
+    right_expr->pos = pos;
+
+    right_add_expr = expression_make_infix(p->alloc, OPERATOR_PLUS, left_add_expr, right_expr);
+    if (!right_add_expr) {
+        goto err;
+    }
+    right_add_expr->pos = pos;
+    left_add_expr = NULL;
+    right_expr = NULL;
+
+    return right_add_expr;
+err:
+    expression_destroy(right_add_expr);
+    expression_destroy(right_expr);
+    expression_destroy(left_add_expr);
+    expression_destroy(to_str_call_expr);
+    expression_destroy(template_expr);
+    expression_destroy(left_string_expr);
+    allocator_free(p->alloc, processed_literal);
+    return NULL;
+}
+
 static expression_t* parse_null_literal(parser_t *p) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
     return expression_make_null_literal(p->alloc);
 }
 
@@ -6127,19 +6329,19 @@ static expression_t* parse_map_literal(parser_t *p) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    while (!cur_token_is(p, TOKEN_RBRACE)) {
+    while (!lexer_cur_token_is(&p->lexer, TOKEN_RBRACE)) {
         expression_t *key = NULL;
-        if (cur_token_is(p, TOKEN_IDENT)) {
-            char *str = token_duplicate_literal(p->alloc, &p->cur_token);
+        if (lexer_cur_token_is(&p->lexer, TOKEN_IDENT)) {
+            char *str = token_duplicate_literal(p->alloc, &p->lexer.cur_token);
             key = expression_make_string_literal(p->alloc, str);
             if (!key) {
                 allocator_free(p->alloc, str);
                 goto err;
             }
-            key->pos = p->cur_token.pos;
-            next_token(p);
+            key->pos = p->lexer.cur_token.pos;
+            lexer_next_token(&p->lexer);
         } else {
             key = parse_expression(p, PRECEDENCE_LOWEST);
             if (!key) {
@@ -6165,11 +6367,11 @@ static expression_t* parse_map_literal(parser_t *p) {
             goto err;
         }
 
-        if (!expect_current(p, TOKEN_COLON)) {
+        if (!lexer_expect_current(&p->lexer, TOKEN_COLON)) {
             goto err;
         }
 
-        next_token(p);
+        lexer_next_token(&p->lexer);
 
         expression_t *value = parse_expression(p, PRECEDENCE_LOWEST);
         if (!value) {
@@ -6181,18 +6383,18 @@ static expression_t* parse_map_literal(parser_t *p) {
             goto err;
         }
 
-        if (cur_token_is(p, TOKEN_RBRACE)) {
+        if (lexer_cur_token_is(&p->lexer, TOKEN_RBRACE)) {
             break;
         }
 
-        if (!expect_current(p, TOKEN_COMMA)) {
+        if (!lexer_expect_current(&p->lexer, TOKEN_COMMA)) {
             goto err;
         }
 
-        next_token(p);
+        lexer_next_token(&p->lexer);
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     expression_t *res = expression_make_map_literal(p->alloc, keys, values);
     if (!res) {
@@ -6206,8 +6408,8 @@ err:
 }
 
 static expression_t* parse_prefix_expression(parser_t *p) {
-    operator_t op = token_to_operator(p->cur_token.type);
-    next_token(p);
+    operator_t op = token_to_operator(p->lexer.cur_token.type);
+    lexer_next_token(&p->lexer);
     expression_t *right = parse_expression(p, PRECEDENCE_PREFIX);
     if (!right) {
         return NULL;
@@ -6221,9 +6423,9 @@ static expression_t* parse_prefix_expression(parser_t *p) {
 }
 
 static expression_t* parse_infix_expression(parser_t *p, expression_t *left) {
-    operator_t op = token_to_operator(p->cur_token.type);
-    precedence_t prec = get_precedence(p->cur_token.type);
-    next_token(p);
+    operator_t op = token_to_operator(p->lexer.cur_token.type);
+    precedence_t prec = get_precedence(p->lexer.cur_token.type);
+    lexer_next_token(&p->lexer);
     expression_t *right = parse_expression(p, prec);
     if (!right) {
         return NULL;
@@ -6237,13 +6439,13 @@ static expression_t* parse_infix_expression(parser_t *p, expression_t *left) {
 }
 
 static expression_t* parse_grouped_expression(parser_t *p) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
     expression_t *expr = parse_expression(p, PRECEDENCE_LOWEST);
-    if (!expr || !expect_current(p, TOKEN_RPAREN)) {
+    if (!expr || !lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
         expression_destroy(expr);
         return NULL;
     }
-    next_token(p);
+    lexer_next_token(&p->lexer);
     return expr;
 }
 
@@ -6252,8 +6454,8 @@ static expression_t* parse_function_literal(parser_t *p) {
     ptrarray(ident) *params = NULL;
     code_block_t *body = NULL;
 
-    if (cur_token_is(p, TOKEN_FUNCTION)) {
-        next_token(p);
+    if (lexer_cur_token_is(&p->lexer, TOKEN_FUNCTION)) {
+        lexer_next_token(&p->lexer);
     }
 
     params = ptrarray_make(p->alloc);
@@ -6285,22 +6487,22 @@ err:
 }
 
 static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params) {
-    if (!expect_current(p, TOKEN_LPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_LPAREN)) {
         return false;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    if (cur_token_is(p, TOKEN_RPAREN)) {
-        next_token(p);
+    if (lexer_cur_token_is(&p->lexer, TOKEN_RPAREN)) {
+        lexer_next_token(&p->lexer);
         return true;
     }
 
-    if (!expect_current(p, TOKEN_IDENT)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_IDENT)) {
         return false;
     }
 
-    ident_t *ident = ident_make(p->alloc, p->cur_token);
+    ident_t *ident = ident_make(p->alloc, p->lexer.cur_token);
     if (!ident) {
         return false;
     }
@@ -6311,16 +6513,16 @@ static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params
         return false;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
-    while (cur_token_is(p, TOKEN_COMMA)) {
-        next_token(p);
+    while (lexer_cur_token_is(&p->lexer, TOKEN_COMMA)) {
+        lexer_next_token(&p->lexer);
 
-        if (!expect_current(p, TOKEN_IDENT)) {
+        if (!lexer_expect_current(&p->lexer, TOKEN_IDENT)) {
             return false;
         }
 
-        ident_t *ident = ident_make(p->alloc, p->cur_token);
+        ident_t *ident = ident_make(p->alloc, p->lexer.cur_token);
         if (!ident) {
             return false;
         }
@@ -6330,14 +6532,14 @@ static bool parse_function_parameters(parser_t *p, ptrarray(ident_t) *out_params
             return false;
         }
 
-        next_token(p);
+        lexer_next_token(&p->lexer);
     }
 
-    if (!expect_current(p, TOKEN_RPAREN)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_RPAREN)) {
         return false;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     return true;
 }
@@ -6357,16 +6559,16 @@ static expression_t* parse_call_expression(parser_t *p, expression_t *left) {
 }
 
 static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t start_token, token_type_t end_token, bool trailing_comma_allowed) {
-    if (!expect_current(p, start_token)) {
+    if (!lexer_expect_current(&p->lexer, start_token)) {
         return NULL;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     ptrarray(expression_t)* res = ptrarray_make(p->alloc);
 
-    if (cur_token_is(p, end_token)) {
-        next_token(p);
+    if (lexer_cur_token_is(&p->lexer, end_token)) {
+        lexer_next_token(&p->lexer);
         return res;
     }
 
@@ -6380,10 +6582,10 @@ static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t s
         goto err;
     }
 
-    while (cur_token_is(p, TOKEN_COMMA)) {
-        next_token(p);
+    while (lexer_cur_token_is(&p->lexer, TOKEN_COMMA)) {
+        lexer_next_token(&p->lexer);
 
-        if (trailing_comma_allowed && cur_token_is(p, end_token)) {
+        if (trailing_comma_allowed && lexer_cur_token_is(&p->lexer, end_token)) {
             break;
         }
 
@@ -6399,11 +6601,11 @@ static ptrarray(expression_t)* parse_expression_list(parser_t *p, token_type_t s
         }
     }
 
-    if (!expect_current(p, end_token)) {
+    if (!lexer_expect_current(&p->lexer, end_token)) {
         goto err;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     return res;
 err:
@@ -6412,19 +6614,19 @@ err:
 }
 
 static expression_t* parse_index_expression(parser_t *p, expression_t *left) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     expression_t *index = parse_expression(p, PRECEDENCE_LOWEST);
     if (!index) {
         return NULL;
     }
 
-    if (!expect_current(p, TOKEN_RBRACKET)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_RBRACKET)) {
         expression_destroy(index);
         return NULL;
     }
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     expression_t *res = expression_make_index(p->alloc, left, index);
     if (!res) {
@@ -6437,9 +6639,9 @@ static expression_t* parse_index_expression(parser_t *p, expression_t *left) {
 
 static expression_t* parse_assign_expression(parser_t *p, expression_t *left) {
     expression_t *source = NULL;
-    token_type_t assign_type = p->cur_token.type;
+    token_type_t assign_type = p->lexer.cur_token.type;
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     source = parse_expression(p, PRECEDENCE_LOWEST);
     if (!source) {
@@ -6488,9 +6690,9 @@ err:
 }
 
 static expression_t* parse_logical_expression(parser_t *p, expression_t *left) {
-    operator_t op = token_to_operator(p->cur_token.type);
-    precedence_t prec = get_precedence(p->cur_token.type);
-    next_token(p);
+    operator_t op = token_to_operator(p->lexer.cur_token.type);
+    precedence_t prec = get_precedence(p->lexer.cur_token.type);
+    lexer_next_token(&p->lexer);
     expression_t *right = parse_expression(p, prec);
     if (!right) {
         return NULL;
@@ -6504,21 +6706,21 @@ static expression_t* parse_logical_expression(parser_t *p, expression_t *left) {
 }
 
 static expression_t* parse_dot_expression(parser_t *p, expression_t *left) {
-    next_token(p);
+    lexer_next_token(&p->lexer);
     
-    if (!expect_current(p, TOKEN_IDENT)) {
+    if (!lexer_expect_current(&p->lexer, TOKEN_IDENT)) {
         return NULL;
     }
 
-    char *str = token_duplicate_literal(p->alloc, &p->cur_token);
+    char *str = token_duplicate_literal(p->alloc, &p->lexer.cur_token);
     expression_t *index = expression_make_string_literal(p->alloc, str);
     if (!index) {
         allocator_free(p->alloc, str);
         return NULL;
     }
-    index->pos = p->cur_token.pos;
+    index->pos = p->lexer.cur_token.pos;
 
-    next_token(p);
+    lexer_next_token(&p->lexer);
 
     expression_t *res = expression_make_index(p->alloc, left, index);
     if (!res) {
@@ -6605,30 +6807,6 @@ static operator_t token_to_operator(token_type_t tk) {
     }
 }
 
-static bool cur_token_is(parser_t *p, token_type_t type) {
-    return p->cur_token.type == type;
-}
-
-static bool peek_token_is(parser_t *p, token_type_t type) {
-    return p->peek_token.type == type;
-}
-
-static bool expect_current(parser_t *p, token_type_t type) {
-    if (lexer_failed(&p->lexer)) {
-        return false;
-    }
-
-    if (!cur_token_is(p, type)) {
-        const char *expected_type_str = token_type_to_string(type);
-        const char *actual_type_str = token_type_to_string(p->cur_token.type);
-        errors_add_errorf(p->errors, ERROR_PARSING, p->cur_token.pos,
-                          "Expected current token to be \"%s\", got \"%s\" instead",
-                          expected_type_str, actual_type_str);
-        return false;
-    }
-    return true;
-}
-
 static char escape_char(const char c) {
     switch (c) {
         case '\"': return '\"';
@@ -6640,10 +6818,7 @@ static char escape_char(const char c) {
         case 'r':  return '\r';
         case 't':  return '\t';
         case '0':  return '\0';
-        default: {
-            APE_ASSERT(false);
-            return -1;
-        }
+        default: return c;
     }
 }
 
@@ -6674,6 +6849,49 @@ static char* process_and_copy_string(allocator_t *alloc, const char *input, size
 error:
     allocator_free(alloc, output);
     return NULL;
+}
+
+static expression_t* wrap_expression_in_function_call(allocator_t *alloc, expression_t *expr, const char *function_name) {
+    token_t fn_token;
+    token_init(&fn_token, TOKEN_IDENT, function_name, (int)strlen(function_name));
+    fn_token.pos = expr->pos;
+
+    ident_t *ident = ident_make(alloc, fn_token);
+    if (!ident) {
+        return NULL;
+    }
+    ident->pos = fn_token.pos;
+
+    expression_t *function_ident_expr = expression_make_ident(alloc, ident);;
+    if (!function_ident_expr) {
+        ident_destroy(ident);
+        return NULL;
+    }
+    function_ident_expr->pos = expr->pos;
+    ident = NULL;
+
+    ptrarray(expression_t) *args = ptrarray_make(alloc);
+    if (!args) {
+        expression_destroy(function_ident_expr);
+        return NULL;
+    }
+
+    bool ok = ptrarray_add(args, expr);
+    if (!ok) {
+        ptrarray_destroy(args);
+        expression_destroy(function_ident_expr);
+        return NULL;
+    }
+
+    expression_t *call_expr = expression_make_call(alloc, function_ident_expr, args);
+    if (!call_expr) {
+        ptrarray_destroy(args);
+        expression_destroy(function_ident_expr);
+        return NULL;
+    }
+    call_expr->pos = expr->pos;
+
+    return call_expr;
 }
 //FILE_END
 //FILE_START:global_store.c
@@ -13330,7 +13548,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 11
+#define APE_IMPL_VERSION_MINOR 12
 #define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\

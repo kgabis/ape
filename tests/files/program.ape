@@ -61,10 +61,10 @@ fn make_person(name) {
     return {
         name: name,
         hello: fn() {
-            println("hello " + this.name)
+            println(`hello ${this.name}`)
         },
         make_hello: fn() {
-            return "hello " + this.name
+            return `hello ${this.name}`
         }
     }
 }
@@ -242,3 +242,11 @@ var this_test = {
 }
 
 assert(this_test.get_inner_name() == "lorem")
+
+fn add(x, y) { return x + y }
+var templ_var = 3
+assert(`foo${templ_var}bar` == "foo3bar")
+assert(`lorem${add(`${add(`x`, "y")}`, `z`)}ipsum` == "loremxyzipsum")
+assert(`${4 * 2}` == "8")
+assert(`${{}}` == "{}")
+assert(`foo\${x}bar` == "foo${x}bar")

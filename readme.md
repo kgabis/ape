@@ -20,8 +20,9 @@ fn contains_item(to_find, items) {
 }
 
 const cities = ["Warszawa", "Rabka", "Szczecin"]
-if (contains_item("Warszawa", cities)) {
-    println("found!")
+const city = "Warszawa"
+if (contains_item(city, cities)) {
+    println(`found ${city}!`)
 }
 ```
 
@@ -69,6 +70,13 @@ const constant = 2
 constant = 1 // fail
 var variable = 3
 variable = 7 // ok
+```
+
+## Strings
+```javascript
+const str1 = "a string"
+const str2 = 'also a string'
+const str3 = `a template string, it can contain expressions: ${2 + 2}, ${str1}`
 ```
 
 ### Arrays
@@ -138,7 +146,7 @@ fn make_person(name) {
     return {
         name: name,
         greet: fn() {
-            println("Hello, I'm " + this.name)
+            println(`Hello, I'm ${this.name}`)
         },
     }
 }

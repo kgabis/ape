@@ -3,7 +3,6 @@ const fun = fn() { const arr = [1, 2, 3]; const dict = {"a": 1, "b": 2}; const s
 if (true) {} elif (x) {};
 {[1,2]:1};
 crash();
-1%0;
 const x = 0; x += 1;
 for (while(true){};;) {};
 for (if (true);;) {};
@@ -25,3 +24,6 @@ var this = ""
 append([], 1,)
 while (false) { var f = fn() { break; } }
 var len = 2;
+var x = `${`
+var x = `${1`
+var x = `${y}`

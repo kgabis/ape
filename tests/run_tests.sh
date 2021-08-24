@@ -2,7 +2,7 @@
 
 set -e
 
-dir=`mktemp -d /tmp/foo.XXXXXXX`
+dir=`mktemp -d /tmp/ape.XXXXXXX`
 echo "Temp dir: ${dir}"
 
 echo "Splitting and copying files"
