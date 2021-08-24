@@ -3666,7 +3666,9 @@ token_t lexer_next_token_internal(lexer_t *lex) {
     lex->prev_token_state.next_position = lex->next_position;
 
     while (true) {
-        skip_whitespace(lex);
+        if (!lex->continue_template_string) {
+            skip_whitespace(lex);
+        }
 
         token_t out_tok;
         out_tok.type = TOKEN_INVALID;
@@ -13549,7 +13551,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 12
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
