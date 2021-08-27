@@ -833,7 +833,7 @@ static void test_foreach_loop() {
 }
 
 static void test_for_loop() {
-    const char *input = "for (var i = 0; i < 10; i += 1) { break; }";
+    const char *input = "for (var i = 0; i < 10; i++) { break; }";
 
     ptrarray(statement_t)* statements = parse(input);
     assert(statements);

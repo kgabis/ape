@@ -156,7 +156,7 @@ fn main() {
     for (var y = 1; y >= 0; y -= 1) {
         for (var x = 64; x >= 0; x -= 1) {
             var p = vec3(13, 13, 13)
-            for (var r = 0; r < 64; r += 1) { 
+            for (var r = 0; r < 64; r++) { 
                 var t = a * (random() - 0.5) * 99 + b * (random() - 0.5) * 99
                 p = sample(vec3(17,16,8) + t, !(t * -1 + (a * (random() + x) + b * (y + random()) + c) * 16)) * 3.5 + p
             }

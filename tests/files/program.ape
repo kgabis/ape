@@ -251,3 +251,64 @@ assert(`${4 * 2}` == "8")
 assert(`${{}}` == "{}")
 assert(`foo\${x}bar` == "foo${x}bar")
 assert(`${1} ${2}` == "1 2")
+
+fn test_ternary(x) {
+    var res = x == 1 ? 1 : 2;
+    return res;
+}
+assert(test_ternary(1) == 1)
+assert(test_ternary(3) == 2)
+assert((true ? true ? 1 : 2 : 3) == 1)
+assert((true ? false ? 1 : 2 : 3) == 2)
+assert(add(true ? 1 : 2, true ? 3 : 5) == 4)
+assert(add(true ? 1 : 2, 3) == 4)
+assert(add(1, true ? 2 : 3) == 3)
+
+var test_obj = {
+    fun: fn() { return 2}
+}
+
+assert(test_obj.fun() == 2)
+assert(test_obj["fun"] != 2)
+assert(test_obj["fun"]() == 2)
+
+fn get_test_arr() {
+    var test_arr = [
+        fn() { return 0 },
+        fn() { return 1 },
+        fn() { return 2 },
+    ]
+    return test_arr
+}
+
+var fun_i = 0
+assert(get_test_arr()[fun_i++]() == 0)
+assert(get_test_arr()[fun_i++]() == 1)
+assert(get_test_arr()[fun_i++]() == 2)
+
+assert(get_test_arr()[--fun_i]() == 2)
+assert(get_test_arr()[--fun_i]() == 1)
+assert(get_test_arr()[--fun_i]() == 0)
+
+{
+    var a = 10
+    var b = a++ + ++a + ++a +a
+    assert(b == 48)
+}
+
+{
+    var a = 0
+    var b = 0
+    assert((a-- - --b) == 1)
+}
+
+{
+    var obj = { foo: 1 }
+    obj.foo++
+    assert(obj.foo == 2)
+    assert(obj.foo++ == 2)
+    assert(obj.foo == 3)
+    assert(--obj.foo == 2)
+    assert(obj.foo-- == 2)
+    assert(obj.foo == 1)
+}

@@ -813,7 +813,7 @@ static void test_while_loops() {
             var x = 0;\
             while (x < 10) {\
                 if (x < 10) {\
-                    x += 1;\
+                    x++;\
                     continue;\
                 }\
                 x = 100;\
@@ -901,7 +901,7 @@ static void test_foreach() {
                 if (res > 5) {\
                     break;\
                 }\
-                res += 1;\
+                res++;\
             }\
             res;\
             ",
@@ -916,7 +916,7 @@ static void test_foreach() {
                 } else {\
                     continue;\
                 }\
-                res += 1;\
+                res++;\
             }\
             res;\
             ",
@@ -958,11 +958,11 @@ static void test_for_loops() {
         int val;
     } tests[] = {
         {
-            "var x = 0; for (var i = 0; i < 10; i += 1) { x += 1; } x",
+            "var x = 0; for (var i = 0; i < 10; i++) { x++; } x",
             10,
         },
         {
-            "var i = 5; for (i = 0; i < 10; i += 1) { } i",
+            "var i = 5; for (i = 0; i < 10; i++) { } i",
             10,
         },
         {
@@ -978,11 +978,11 @@ static void test_for_loops() {
             10,
         },
         {
-            "var i = 0; for (;i < 10;) { i += 1; } i",
+            "var i = 0; for (;i < 10;) { i++; } i",
             10,
         },
         {
-            "var x = 0; for (var i = 0; i < 10; i += 1) { if (i%2) { continue; } x += 1; } x",
+            "var x = 0; for (var i = 0; i < 10; i++) { if (i%2) { continue; } x++; } x",
             5,
         }
     };

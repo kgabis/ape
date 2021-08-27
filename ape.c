@@ -460,8 +460,12 @@ typedef enum {
     TOKEN_LSHIFT_ASSIGN,
     TOKEN_RSHIFT_ASSIGN,
 
+    TOKEN_QUESTION,
+
     TOKEN_PLUS,
+    TOKEN_PLUS_PLUS,
     TOKEN_MINUS,
+    TOKEN_MINUS_MINUS,
     TOKEN_BANG,
     TOKEN_ASTERISK,
     TOKEN_SLASH,
@@ -696,6 +700,7 @@ typedef struct index_expression {
 typedef struct assign_expression {
     expression_t *dest;
     expression_t *source;
+    bool is_postfix;
 } assign_expression_t;
 
 typedef struct logical_expression {
@@ -703,6 +708,12 @@ typedef struct logical_expression {
     expression_t *left;
     expression_t *right;
 } logical_expression_t;
+
+typedef struct ternary_expression {
+    expression_t *test;
+    expression_t *if_true;
+    expression_t *if_false;
+} ternary_expression_t;
 
 typedef enum expression_type {
     EXPRESSION_NONE,
@@ -720,6 +731,7 @@ typedef enum expression_type {
     EXPRESSION_INDEX,
     EXPRESSION_ASSIGN,
     EXPRESSION_LOGICAL,
+    EXPRESSION_TERNARY,
 } expression_type_t;
 
 typedef struct ident {
@@ -745,6 +757,7 @@ typedef struct expression {
         index_expression_t index_expr;
         assign_expression_t assign;
         logical_expression_t logical;
+        ternary_expression_t ternary;
     };
     src_pos_t pos;
 } expression_t;
@@ -856,8 +869,9 @@ APE_INTERNAL expression_t* expression_make_infix(allocator_t *alloc, operator_t 
 APE_INTERNAL expression_t* expression_make_fn_literal(allocator_t *alloc, ptrarray(ident_t) *params, code_block_t *body);
 APE_INTERNAL expression_t* expression_make_call(allocator_t *alloc, expression_t *function, ptrarray(expression_t) *args);
 APE_INTERNAL expression_t* expression_make_index(allocator_t *alloc, expression_t *left, expression_t *index);
-APE_INTERNAL expression_t* expression_make_assign(allocator_t *alloc, expression_t *dest, expression_t *source);
+APE_INTERNAL expression_t* expression_make_assign(allocator_t *alloc, expression_t *dest, expression_t *source, bool is_postfix);
 APE_INTERNAL expression_t* expression_make_logical(allocator_t *alloc, operator_t op, expression_t *left, expression_t *right);
+APE_INTERNAL expression_t* expression_make_ternary(allocator_t *alloc, expression_t *test, expression_t *if_true, expression_t *if_false);
 
 APE_INTERNAL void expression_destroy(expression_t *expr);
 
@@ -896,8 +910,8 @@ APE_INTERNAL if_case_t* if_case_copy(if_case_t *cond);
 typedef struct parser parser_t;
 typedef struct errors errors_t;
 
-typedef expression_t* (*prefix_parse_fn)(parser_t *p);
-typedef expression_t* (*infix_parse_fn)(parser_t *p, expression_t *expr);
+typedef expression_t* (*right_assoc_parse_fn)(parser_t *p);
+typedef expression_t* (*left_assoc_parse_fn)(parser_t *p, expression_t *expr);
 
 typedef struct parser {
     allocator_t *alloc;
@@ -905,8 +919,8 @@ typedef struct parser {
     lexer_t lexer;
     errors_t *errors;
     
-    prefix_parse_fn prefix_parse_fns[TOKEN_TYPE_MAX];
-    infix_parse_fn infix_parse_fns[TOKEN_TYPE_MAX];
+    right_assoc_parse_fn right_assoc_parse_fns[TOKEN_TYPE_MAX];
+    left_assoc_parse_fn left_assoc_parse_fns[TOKEN_TYPE_MAX];
 
     int depth;
 } parser_t;
@@ -3446,8 +3460,11 @@ static const char *g_type_names[] = {
     "^=",
     "<<=",
     ">>=",
+    "?",
     "+",
+    "++",
     "-",
+    "--",
     "!",
     "*",
     "/",
@@ -3726,6 +3743,9 @@ token_t lexer_next_token_internal(lexer_t *lex) {
                 if (peek_char(lex) == '=') {
                     token_init(&out_tok, TOKEN_PLUS_ASSIGN, "+=", 2);
                     read_char(lex);
+                } else if (peek_char(lex) == '+') {
+                    token_init(&out_tok, TOKEN_PLUS_PLUS, "++", 2);
+                    read_char(lex);
                 } else {
                     token_init(&out_tok, TOKEN_PLUS, "+", 1); break;
                 }
@@ -3734,6 +3754,9 @@ token_t lexer_next_token_internal(lexer_t *lex) {
             case '-': {
                 if (peek_char(lex) == '=') {
                     token_init(&out_tok, TOKEN_MINUS_ASSIGN, "-=", 2);
+                    read_char(lex);
+                } else if (peek_char(lex) == '-') {
+                    token_init(&out_tok, TOKEN_MINUS_MINUS, "--", 2);
                     read_char(lex);
                 } else {
                     token_init(&out_tok, TOKEN_MINUS, "-", 1); break;
@@ -3817,6 +3840,7 @@ token_t lexer_next_token_internal(lexer_t *lex) {
             case '[': token_init(&out_tok, TOKEN_LBRACKET, "[", 1); break;
             case ']': token_init(&out_tok, TOKEN_RBRACKET, "]", 1); break;
             case '.': token_init(&out_tok, TOKEN_DOT, ".", 1); break;
+            case '?': token_init(&out_tok, TOKEN_QUESTION, "?", 1); break;
             case '%': {
                 if (peek_char(lex) == '=') {
                     token_init(&out_tok, TOKEN_PERCENT_ASSIGN, "%=", 2);
@@ -4213,13 +4237,14 @@ expression_t* expression_make_index(allocator_t *alloc, expression_t *left, expr
     return res;
 }
 
-expression_t* expression_make_assign(allocator_t *alloc, expression_t *dest, expression_t *source) {
+expression_t* expression_make_assign(allocator_t *alloc, expression_t *dest, expression_t *source, bool is_postfix) {
     expression_t *res = expression_make(alloc, EXPRESSION_ASSIGN);
     if (!res) {
         return NULL;
     }
     res->assign.dest = dest;
     res->assign.source = source;
+    res->assign.is_postfix = is_postfix;
     return res;
 }
 
@@ -4231,6 +4256,17 @@ expression_t* expression_make_logical(allocator_t *alloc, operator_t op, express
     res->logical.op = op;
     res->logical.left = left;
     res->logical.right = right;
+    return res;
+}
+
+expression_t* expression_make_ternary(allocator_t *alloc, expression_t *test, expression_t *if_true, expression_t *if_false) {
+    expression_t *res = expression_make(alloc, EXPRESSION_TERNARY);
+    if (!res) {
+        return NULL;
+    }
+    res->ternary.test = test;
+    res->ternary.if_true = if_true;
+    res->ternary.if_false = if_false;
     return res;
 }
 
@@ -4302,6 +4338,12 @@ void expression_destroy(expression_t *expr) {
         case EXPRESSION_LOGICAL: {
             expression_destroy(expr->logical.left);
             expression_destroy(expr->logical.right);
+            break;
+        }
+        case EXPRESSION_TERNARY: {
+            expression_destroy(expr->ternary.test);
+            expression_destroy(expr->ternary.if_true);
+            expression_destroy(expr->ternary.if_false);
             break;
         }
     }
@@ -4471,7 +4513,7 @@ expression_t* expression_copy(expression_t *expr) {
                 expression_destroy(source_copy);
                 return NULL;
             }
-            res = expression_make_assign(expr->alloc, dest_copy, source_copy);
+            res = expression_make_assign(expr->alloc, dest_copy, source_copy, expr->assign.is_postfix);
             if (!res) {
                 expression_destroy(dest_copy);
                 expression_destroy(source_copy);
@@ -4491,6 +4533,25 @@ expression_t* expression_copy(expression_t *expr) {
             if (!res) {
                 expression_destroy(left_copy);
                 expression_destroy(right_copy);
+                return NULL;
+            }
+            break;
+        }
+        case EXPRESSION_TERNARY: {
+            expression_t *test_copy = expression_copy(expr->ternary.test);
+            expression_t *if_true_copy = expression_copy(expr->ternary.if_true);
+            expression_t *if_false_copy = expression_copy(expr->ternary.if_false);
+            if (!test_copy || !if_true_copy || !if_false_copy) {
+                expression_destroy(test_copy);
+                expression_destroy(if_true_copy);
+                expression_destroy(if_false_copy);
+                return NULL;
+            }
+            res = expression_make_ternary(expr->alloc, test_copy, if_true_copy, if_false_copy);
+            if (!res) {
+                expression_destroy(test_copy);
+                expression_destroy(if_true_copy);
+                expression_destroy(if_false_copy);
                 return NULL;
             }
             break;
@@ -5152,6 +5213,14 @@ void expression_to_string(expression_t *expr, strbuf_t *buf) {
             expression_to_string(expr->logical.right, buf);
             break;
         }
+        case EXPRESSION_TERNARY: {
+            expression_to_string(expr->ternary.test, buf);
+            strbuf_append(buf, " ? ");
+            expression_to_string(expr->ternary.if_true, buf);
+            strbuf_append(buf, " : ");
+            expression_to_string(expr->ternary.if_false, buf);
+            break;
+        }
         case EXPRESSION_NONE: {
             strbuf_append(buf, "EXPRESSION_NONE");
             break;
@@ -5210,6 +5279,7 @@ const char *expression_type_to_string(expression_type_t type) {
         case EXPRESSION_INDEX:            return "INDEX";
         case EXPRESSION_ASSIGN:           return "ASSIGN";
         case EXPRESSION_LOGICAL:          return "LOGICAL";
+        case EXPRESSION_TERNARY:          return "TERNARY";
         default:                          return "UNKNOWN";
     }
 }
@@ -5340,6 +5410,7 @@ static statement_t* statement_make(allocator_t *alloc, statement_type_t type) {
 typedef enum precedence {
     PRECEDENCE_LOWEST = 0,
     PRECEDENCE_ASSIGN,      // a = b
+    PRECEDENCE_TERNARY,     // a ? b : c
     PRECEDENCE_LOGICAL_OR,  // ||
     PRECEDENCE_LOGICAL_AND, // &&
     PRECEDENCE_BIT_OR,      // |
@@ -5350,10 +5421,9 @@ typedef enum precedence {
     PRECEDENCE_SHIFT,       // << >>
     PRECEDENCE_SUM,         // + -
     PRECEDENCE_PRODUCT,     // * / %
-    PRECEDENCE_PREFIX,      // -X or !X
-    PRECEDENCE_CALL,        // myFunction(X)
-    PRECEDENCE_INDEX,       // arr[x]
-    PRECEDENCE_DOT,         // obj.foo
+    PRECEDENCE_PREFIX,      // -x !x ++x --x
+    PRECEDENCE_INCDEC,      // x++ x--
+    PRECEDENCE_POSTFIX,     // myFunction(x) x["foo"] x.foo
     PRECEDENCE_HIGHEST
 } precedence_t;
 
@@ -5395,6 +5465,9 @@ static expression_t* parse_index_expression(parser_t *p, expression_t *left);
 static expression_t* parse_dot_expression(parser_t *p, expression_t *left);
 static expression_t* parse_assign_expression(parser_t *p, expression_t *left);
 static expression_t* parse_logical_expression(parser_t *p, expression_t *left);
+static expression_t* parse_ternary_expression(parser_t *p, expression_t *left);
+static expression_t* parse_incdec_prefix_expression(parser_t *p);
+static expression_t* parse_incdec_postfix_expression(parser_t *p, expression_t *left);
 
 static precedence_t get_precedence(token_type_t tk);
 static operator_t token_to_operator(token_type_t tk);
@@ -5414,52 +5487,57 @@ parser_t* parser_make(allocator_t *alloc, const ape_config_t *config, errors_t *
     parser->config = config;
     parser->errors = errors;
 
-    parser->prefix_parse_fns[TOKEN_IDENT] = parse_identifier;
-    parser->prefix_parse_fns[TOKEN_NUMBER] = parse_number_literal;
-    parser->prefix_parse_fns[TOKEN_TRUE] = parse_bool_literal;
-    parser->prefix_parse_fns[TOKEN_FALSE] = parse_bool_literal;
-    parser->prefix_parse_fns[TOKEN_STRING] = parse_string_literal;
-    parser->prefix_parse_fns[TOKEN_TEMPLATE_STRING] = parse_template_string_literal;
-    parser->prefix_parse_fns[TOKEN_NULL] = parse_null_literal;
-    parser->prefix_parse_fns[TOKEN_BANG] = parse_prefix_expression;
-    parser->prefix_parse_fns[TOKEN_MINUS] = parse_prefix_expression;
-    parser->prefix_parse_fns[TOKEN_LPAREN] = parse_grouped_expression;
-    parser->prefix_parse_fns[TOKEN_FUNCTION] = parse_function_literal;
-    parser->prefix_parse_fns[TOKEN_LBRACKET] = parse_array_literal;
-    parser->prefix_parse_fns[TOKEN_LBRACE] = parse_map_literal;
+    parser->right_assoc_parse_fns[TOKEN_IDENT] = parse_identifier;
+    parser->right_assoc_parse_fns[TOKEN_NUMBER] = parse_number_literal;
+    parser->right_assoc_parse_fns[TOKEN_TRUE] = parse_bool_literal;
+    parser->right_assoc_parse_fns[TOKEN_FALSE] = parse_bool_literal;
+    parser->right_assoc_parse_fns[TOKEN_STRING] = parse_string_literal;
+    parser->right_assoc_parse_fns[TOKEN_TEMPLATE_STRING] = parse_template_string_literal;
+    parser->right_assoc_parse_fns[TOKEN_NULL] = parse_null_literal;
+    parser->right_assoc_parse_fns[TOKEN_BANG] = parse_prefix_expression;
+    parser->right_assoc_parse_fns[TOKEN_MINUS] = parse_prefix_expression;
+    parser->right_assoc_parse_fns[TOKEN_LPAREN] = parse_grouped_expression;
+    parser->right_assoc_parse_fns[TOKEN_FUNCTION] = parse_function_literal;
+    parser->right_assoc_parse_fns[TOKEN_LBRACKET] = parse_array_literal;
+    parser->right_assoc_parse_fns[TOKEN_LBRACE] = parse_map_literal;
+    parser->right_assoc_parse_fns[TOKEN_PLUS_PLUS] = parse_incdec_prefix_expression;
+    parser->right_assoc_parse_fns[TOKEN_MINUS_MINUS] = parse_incdec_prefix_expression;
 
-    parser->infix_parse_fns[TOKEN_PLUS] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_MINUS] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_SLASH] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_ASTERISK] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_PERCENT] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_EQ] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_NOT_EQ] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_LT] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_LTE] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_GT] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_GTE] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_LPAREN] = parse_call_expression;
-    parser->infix_parse_fns[TOKEN_LBRACKET] = parse_index_expression;
-    parser->infix_parse_fns[TOKEN_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_PLUS_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_MINUS_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_SLASH_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_ASTERISK_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_PERCENT_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_BIT_AND_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_BIT_OR_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_BIT_XOR_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_LSHIFT_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_RSHIFT_ASSIGN] = parse_assign_expression;
-    parser->infix_parse_fns[TOKEN_DOT] = parse_dot_expression;
-    parser->infix_parse_fns[TOKEN_AND] = parse_logical_expression;
-    parser->infix_parse_fns[TOKEN_OR] = parse_logical_expression;
-    parser->infix_parse_fns[TOKEN_BIT_AND] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_BIT_OR] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_BIT_XOR] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_LSHIFT] = parse_infix_expression;
-    parser->infix_parse_fns[TOKEN_RSHIFT] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_PLUS] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_MINUS] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_SLASH] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_ASTERISK] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_PERCENT] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_EQ] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_NOT_EQ] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_LT] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_LTE] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_GT] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_GTE] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_LPAREN] = parse_call_expression;
+    parser->left_assoc_parse_fns[TOKEN_LBRACKET] = parse_index_expression;
+    parser->left_assoc_parse_fns[TOKEN_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_PLUS_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_MINUS_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_SLASH_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_ASTERISK_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_PERCENT_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_BIT_AND_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_BIT_OR_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_BIT_XOR_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_LSHIFT_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_RSHIFT_ASSIGN] = parse_assign_expression;
+    parser->left_assoc_parse_fns[TOKEN_DOT] = parse_dot_expression;
+    parser->left_assoc_parse_fns[TOKEN_AND] = parse_logical_expression;
+    parser->left_assoc_parse_fns[TOKEN_OR] = parse_logical_expression;
+    parser->left_assoc_parse_fns[TOKEN_BIT_AND] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_BIT_OR] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_BIT_XOR] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_LSHIFT] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_RSHIFT] = parse_infix_expression;
+    parser->left_assoc_parse_fns[TOKEN_QUESTION] = parse_ternary_expression;
+    parser->left_assoc_parse_fns[TOKEN_PLUS_PLUS] = parse_incdec_postfix_expression;
+    parser->left_assoc_parse_fns[TOKEN_MINUS_MINUS] = parse_incdec_postfix_expression;
 
     parser->depth = 0;
 
@@ -6133,8 +6211,8 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
         return NULL;
     }
 
-    prefix_parse_fn prefix = p->prefix_parse_fns[p->lexer.cur_token.type];
-    if (!prefix) {
+    right_assoc_parse_fn parse_right_assoc = p->right_assoc_parse_fns[p->lexer.cur_token.type];
+    if (!parse_right_assoc) {
         char *literal = token_duplicate_literal(p->alloc, &p->lexer.cur_token);
         errors_add_errorf(p->errors, ERROR_PARSING, p->lexer.cur_token.pos,
                                   "No prefix parse function for \"%s\" found", literal);
@@ -6142,19 +6220,19 @@ static expression_t* parse_expression(parser_t *p, precedence_t prec) {
         return NULL;
     }
 
-    expression_t *left_expr = prefix(p);
+    expression_t *left_expr = parse_right_assoc(p);
     if (!left_expr) {
         return NULL;
     }
     left_expr->pos = pos;
 
     while (!lexer_cur_token_is(&p->lexer, TOKEN_SEMICOLON) && prec < get_precedence(p->lexer.cur_token.type)) {
-        infix_parse_fn infix = p->infix_parse_fns[p->lexer.cur_token.type];
-        if (!infix) {
+        left_assoc_parse_fn parse_left_assoc = p->left_assoc_parse_fns[p->lexer.cur_token.type];
+        if (!parse_left_assoc) {
             return left_expr;
         }
         pos = p->lexer.cur_token.pos;
-        expression_t *new_left_expr = infix(p, left_expr);
+        expression_t *new_left_expr = parse_left_assoc(p, left_expr);
         if (!new_left_expr) {
             expression_destroy(left_expr);
             return NULL;
@@ -6253,12 +6331,12 @@ static expression_t* parse_template_string_literal(parser_t *p) {
     if (!template_expr) {
         goto err;
     }
-    template_expr->pos = pos;
 
     to_str_call_expr = wrap_expression_in_function_call(p->alloc, template_expr, "to_str");
     if (!to_str_call_expr) {
         goto err;
     }
+    to_str_call_expr->pos = pos;
     template_expr = NULL;
 
     left_add_expr = expression_make_infix(p->alloc, OPERATOR_PLUS, left_string_expr, to_str_call_expr);
@@ -6283,7 +6361,6 @@ static expression_t* parse_template_string_literal(parser_t *p) {
     if (!right_expr) {
         goto err;
     }
-    right_expr->pos = pos;
 
     right_add_expr = expression_make_infix(p->alloc, OPERATOR_PLUS, left_add_expr, right_expr);
     if (!right_add_expr) {
@@ -6452,7 +6529,7 @@ static expression_t* parse_grouped_expression(parser_t *p) {
 }
 
 static expression_t* parse_function_literal(parser_t *p) {
-    p->depth += 1;
+    p->depth++;
     ptrarray(ident) *params = NULL;
     code_block_t *body = NULL;
 
@@ -6681,7 +6758,7 @@ static expression_t* parse_assign_expression(parser_t *p, expression_t *left) {
         default: APE_ASSERT(false); break;
     }
 
-    expression_t *res = expression_make_assign(p->alloc, left, source);
+    expression_t *res = expression_make_assign(p->alloc, left, source, false);
     if (!res) {
         goto err;
     }
@@ -6706,6 +6783,126 @@ static expression_t* parse_logical_expression(parser_t *p, expression_t *left) {
     }
     return res;
 }
+
+static expression_t* parse_ternary_expression(parser_t *p, expression_t *left) {
+    lexer_next_token(&p->lexer);
+
+    expression_t *if_true = parse_expression(p, PRECEDENCE_LOWEST);
+    if (!if_true) {
+        return NULL;
+    }
+
+    if (!lexer_expect_current(&p->lexer, TOKEN_COLON)) {
+        expression_destroy(if_true);
+        return NULL;
+    }
+    lexer_next_token(&p->lexer);
+
+    expression_t *if_false = parse_expression(p, PRECEDENCE_LOWEST);
+    if (!if_false) {
+        expression_destroy(if_true);
+        return NULL;
+    }
+
+    expression_t *res = expression_make_ternary(p->alloc, left, if_true, if_false);
+    if (!res) {
+        expression_destroy(if_true);
+        expression_destroy(if_false);
+        return NULL;
+    }
+
+    return res;
+}
+
+static expression_t* parse_incdec_prefix_expression(parser_t *p) {
+    expression_t *source = NULL;
+    token_type_t operation_type = p->lexer.cur_token.type;
+    src_pos_t pos = p->lexer.cur_token.pos;
+
+    lexer_next_token(&p->lexer);
+
+    operator_t op = token_to_operator(operation_type);
+
+    expression_t *dest = parse_expression(p, PRECEDENCE_PREFIX);
+    if (!dest) {
+        goto err;
+    }
+
+    expression_t *one_literal = expression_make_number_literal(p->alloc, 1);
+    if (!one_literal) {
+        expression_destroy(dest);
+        goto err;
+    }
+    one_literal->pos = pos;
+
+    expression_t *dest_copy = expression_copy(dest);
+    if (!dest_copy) {
+        expression_destroy(one_literal);
+        expression_destroy(dest);
+        goto err;
+    }
+
+    expression_t *operation = expression_make_infix(p->alloc, op, dest_copy, one_literal);
+    if (!operation) {
+        expression_destroy(dest_copy);
+        expression_destroy(dest);
+        expression_destroy(one_literal);
+        goto err;
+    }
+    operation->pos = pos;
+
+    expression_t *res = expression_make_assign(p->alloc, dest, operation, false);
+    if (!res) {
+        expression_destroy(dest);
+        expression_destroy(operation);
+        goto err;
+    }
+    return res;
+err:
+    expression_destroy(source);
+    return NULL;
+}
+
+static expression_t* parse_incdec_postfix_expression(parser_t *p, expression_t *left) {
+    expression_t *source = NULL;
+    token_type_t operation_type = p->lexer.cur_token.type;
+    src_pos_t pos = p->lexer.cur_token.pos;
+
+    lexer_next_token(&p->lexer);
+
+    operator_t op = token_to_operator(operation_type);
+    expression_t *left_copy = expression_copy(left);
+    if (!left_copy) {
+        goto err;
+    }
+
+    expression_t *one_literal = expression_make_number_literal(p->alloc, 1);
+    if (!one_literal) {
+        expression_destroy(left_copy);
+        goto err;
+    }
+    one_literal->pos = pos;
+
+    expression_t *operation = expression_make_infix(p->alloc, op, left_copy, one_literal);
+    if (!operation) {
+        expression_destroy(one_literal);
+        expression_destroy(left_copy);
+        goto err;
+    }
+    operation->pos = pos;
+
+    expression_t *res = expression_make_assign(p->alloc, left, operation, true);
+    if (!res) {
+        expression_destroy(operation);
+        goto err;
+    }
+
+    return res;
+err:
+    expression_destroy(source);
+    return NULL;
+}
+
 
 static expression_t* parse_dot_expression(parser_t *p, expression_t *left) {
     lexer_next_token(&p->lexer);
@@ -6745,8 +6942,8 @@ static precedence_t get_precedence(token_type_t tk) {
         case TOKEN_SLASH:           return PRECEDENCE_PRODUCT;
         case TOKEN_ASTERISK:        return PRECEDENCE_PRODUCT;
         case TOKEN_PERCENT:         return PRECEDENCE_PRODUCT;
-        case TOKEN_LPAREN:          return PRECEDENCE_CALL;
-        case TOKEN_LBRACKET:        return PRECEDENCE_INDEX;
+        case TOKEN_LPAREN:          return PRECEDENCE_POSTFIX;
+        case TOKEN_LBRACKET:        return PRECEDENCE_POSTFIX;
         case TOKEN_ASSIGN:          return PRECEDENCE_ASSIGN;
         case TOKEN_PLUS_ASSIGN:     return PRECEDENCE_ASSIGN;
         case TOKEN_MINUS_ASSIGN:    return PRECEDENCE_ASSIGN;
@@ -6758,7 +6955,7 @@ static precedence_t get_precedence(token_type_t tk) {
         case TOKEN_BIT_XOR_ASSIGN:  return PRECEDENCE_ASSIGN;
         case TOKEN_LSHIFT_ASSIGN:   return PRECEDENCE_ASSIGN;
         case TOKEN_RSHIFT_ASSIGN:   return PRECEDENCE_ASSIGN;
-        case TOKEN_DOT:             return PRECEDENCE_DOT;
+        case TOKEN_DOT:             return PRECEDENCE_POSTFIX;
         case TOKEN_AND:             return PRECEDENCE_LOGICAL_AND;
         case TOKEN_OR:              return PRECEDENCE_LOGICAL_OR;
         case TOKEN_BIT_OR:          return PRECEDENCE_BIT_OR;
@@ -6766,6 +6963,9 @@ static precedence_t get_precedence(token_type_t tk) {
         case TOKEN_BIT_AND:         return PRECEDENCE_BIT_AND;
         case TOKEN_LSHIFT:          return PRECEDENCE_SHIFT;
         case TOKEN_RSHIFT:          return PRECEDENCE_SHIFT;
+        case TOKEN_QUESTION:        return PRECEDENCE_TERNARY;
+        case TOKEN_PLUS_PLUS:       return PRECEDENCE_INCDEC;
+        case TOKEN_MINUS_MINUS:     return PRECEDENCE_INCDEC;
         default:                    return PRECEDENCE_LOWEST;
     }
 }
@@ -6802,6 +7002,8 @@ static operator_t token_to_operator(token_type_t tk) {
         case TOKEN_BIT_XOR:         return OPERATOR_BIT_XOR;
         case TOKEN_LSHIFT:          return OPERATOR_LSHIFT;
         case TOKEN_RSHIFT:          return OPERATOR_RSHIFT;
+        case TOKEN_PLUS_PLUS:       return OPERATOR_PLUS;
+        case TOKEN_MINUS_MINUS:     return OPERATOR_MINUS;
         default: {
             APE_ASSERT(false);
             return OPERATOR_NONE;
@@ -7606,7 +7808,7 @@ void code_to_string(uint8_t *code, src_pos_t *source_positions, size_t code_size
         } else {
             strbuf_appendf(res, "%04d %s", pos, def->name);
         }
-        pos += 1;
+        pos++;
 
         uint64_t operands[2];
         code_read_operands(def, code + pos, operands);
@@ -9356,6 +9558,13 @@ static bool compile_expression(compiler_t *comp, expression_t *expr) {
                 goto error;
             }
 
+            if (assign->is_postfix) {
+                ok = compile_expression(comp, assign->dest);
+                if (!ok) {
+                    goto error;
+                }
+            }
+
             ok = compile_expression(comp, assign->source);
             if (!ok) {
                 goto error;
@@ -9403,6 +9612,14 @@ static bool compile_expression(compiler_t *comp, expression_t *expr) {
                     goto error;
                 }
             }
+
+            if (assign->is_postfix) {
+                ip = emit(comp, OPCODE_POP, 0, NULL);
+                if (ip < 0) {
+                    goto error;
+                }
+            }
+
             array_pop(comp->src_positions_stack, NULL);
             break;
         }
@@ -9442,6 +9659,36 @@ static bool compile_expression(compiler_t *comp, expression_t *expr) {
 
             int after_right_ip = get_ip(comp);
             change_uint16_operand(comp, after_left_jump_ip + 1, after_right_ip);
+
+            break;
+        }
+        case EXPRESSION_TERNARY: {
+            const ternary_expression_t* ternary = &expr->ternary;
+
+            ok = compile_expression(comp, ternary->test);
+            if (!ok) {
+                goto error;
+            }
+
+            int else_jump_ip = emit(comp, OPCODE_JUMP_IF_FALSE, 1, (uint64_t[]){0xbeef});
+
+            ok = compile_expression(comp, ternary->if_true);
+            if (!ok) {
+                goto error;
+            }
+
+            int end_jump_ip = emit(comp, OPCODE_JUMP, 1, (uint64_t[]){0xbeef});
+
+            int else_ip = get_ip(comp);
+            change_uint16_operand(comp, else_jump_ip + 1, else_ip);
+
+            ok = compile_expression(comp, ternary->if_false);
+            if (!ok) {
+                goto error;
+            }
+
+            int end_ip = get_ip(comp);
+            change_uint16_operand(comp, end_jump_ip + 1, end_ip);
 
             break;
         }
@@ -10440,10 +10687,13 @@ double object_compare(object_t a, object_t b) {
         const char *left_string = object_get_string(a);
         const char *right_string = object_get_string(b);
         return strcmp(left_string, right_string);
-    } else {
+    } else if ((object_is_allocated(a) || object_is_null(a))
+            && (object_is_allocated(b) || object_is_null(b))) {
         intptr_t a_data_val = (intptr_t)object_get_allocated_data(a);
         intptr_t b_data_val = (intptr_t)object_get_allocated_data(b);
         return (double)(a_data_val - b_data_val);
+    } else {
+        return a.handle - b.handle;
     }
 }
 
@@ -12437,7 +12687,7 @@ uint16_t frame_read_uint16(frame_t* frame) {
 
 uint8_t frame_read_uint8(frame_t* frame) {
     const uint8_t *data = frame->bytecode + frame->ip;
-    frame->ip += 1;
+    frame->ip++;
     return data[0];
 }
 
@@ -13550,8 +13800,8 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 12
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_MINOR 13
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\

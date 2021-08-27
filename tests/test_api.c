@@ -469,7 +469,6 @@ static void test_time_limit() {
 static void test_allocation_fails() {
     int n = 0;
     while (true) {
-//        printf("Failing at allocation %d\n", n);
         failing_alloc_t failing_alloc = {
             .allocation_to_fail = n,
             .alloc_count = 0,
@@ -510,7 +509,10 @@ static void test_allocation_fails() {
 
         ape_destroy(ape);
 
-        assert(failing_alloc.alloc_count == 0);
+        if (failing_alloc.alloc_count != 0) {
+            printf("Leak after failing allocation %d\n", n - 1);
+            assert(false);
+        }
 
         if (!failing_alloc.has_failed) {
             break;

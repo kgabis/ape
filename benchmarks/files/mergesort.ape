@@ -23,7 +23,7 @@ fn merge(left, right) {
 fn split(arr, at) {
     var left = []
     var right = []
-    for (var i = 0; i < len(arr); i += 1) {
+    for (var i = 0; i < len(arr); i++) {
         if (i < at) {
             append(left, arr[i])
         } else {
@@ -46,13 +46,13 @@ fn mergeSort(arr) {
 
 var arr_len = 1<<18
 var arr = []
-for (var i = 0; i < arr_len; i += 1) {
+for (var i = 0; i < arr_len; i++) {
     var num = floor(random())
     append(arr, num)
 }
 
 var sorted = mergeSort(arr)
 
-for (var i = 0; i < arr_len - 1; i += 1) {
+for (var i = 0; i < arr_len - 1; i++) {
     assert(sorted[i] <= sorted[i + 1])
 }

@@ -4,7 +4,7 @@ fn is_prime(n) {
         if (n % i == 0) {
             return false
         }
-        i += 1
+        i++
     }
     return true
 }
@@ -14,9 +14,9 @@ fn nth_prime(n) {
     var count = 0
     while (count < n) {
         if (is_prime(candidate)) {
-            count += 1
+            count++
         }
-        candidate += 1
+        candidate++
     }
     return candidate - 1
 }

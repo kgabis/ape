@@ -119,7 +119,7 @@ for (item in items) {
     }
 }
 
-for (var i = 0; i < 10; i += 1) {
+for (var i = 0; i < 10; i++) {
     // body
 }
 ```
