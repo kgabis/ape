@@ -312,3 +312,7 @@ assert(get_test_arr()[--fun_i]() == 0)
     assert(obj.foo-- == 2)
     assert(obj.foo == 1)
 }
+
+assert(1 == 1)
+assert(1 != "1")
+assert(1 != {})

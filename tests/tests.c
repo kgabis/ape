@@ -22,7 +22,6 @@ int tests_main() {
 #if 0
 } // unconfuse xcode
 #endif
-   
     lexer_test();
     parser_test();
     code_test();

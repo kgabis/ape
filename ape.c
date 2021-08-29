@@ -1070,7 +1070,7 @@ APE_INTERNAL char*       object_get_type_union_name(allocator_t *alloc, const ob
 APE_INTERNAL char*       object_serialize(allocator_t *alloc, object_t object);
 APE_INTERNAL object_t    object_deep_copy(gcmem_t *mem, object_t object);
 APE_INTERNAL object_t    object_copy(gcmem_t *mem, object_t obj);
-APE_INTERNAL double      object_compare(object_t a, object_t b);
+APE_INTERNAL double      object_compare(object_t a, object_t b, bool *out_ok);
 APE_INTERNAL bool        object_equals(object_t a, object_t b);
 
 APE_INTERNAL object_data_t* object_get_allocated_data(object_t object);
@@ -1246,6 +1246,7 @@ typedef enum opcode_val {
     OPCODE_TRUE,
     OPCODE_FALSE,
     OPCODE_COMPARE,
+    OPCODE_COMPARE_EQ,
     OPCODE_EQUAL,
     OPCODE_NOT_EQUAL,
     OPCODE_GREATER_THAN,
@@ -7672,6 +7673,7 @@ static opcode_definition_t g_definitions[OPCODE_MAX + 1] = {
     {"TRUE", 0, {0}},
     {"FALSE", 0, {0}},
     {"COMPARE", 0, {0}},
+    {"COMPARE_EQ", 0, {0}},
     {"EQUAL", 0, {0}},
     {"NOT_EQUAL", 0, {0}},
     {"GREATER_THAN", 0, {0}},
@@ -8160,8 +8162,6 @@ static bool module_add_symbol(module_t *module, const symbol_t *symbol);
 
 static const char* get_module_name(const char *path);
 static const symbol_t* define_symbol(compiler_t *comp, src_pos_t pos, const char *name, bool assignable, bool can_shadow);
-
-static bool is_comparison(operator_t op);
 
 compiler_t *compiler_make(allocator_t *alloc, const ape_config_t *config, gcmem_t *mem, errors_t *errors, ptrarray(compiled_file_t) *files, global_store_t *global_store) {
     compiler_t *comp = allocator_malloc(alloc, sizeof(compiler_t));
@@ -9277,11 +9277,28 @@ static bool compile_expression(compiler_t *comp, expression_t *expr) {
                 goto error;
             }
 
-            if (is_comparison(expr->infix.op)) {
-                ip = emit(comp, OPCODE_COMPARE, 0, NULL);
-                if (ip < 0) {
-                    goto error;
+            switch (expr->infix.op) {
+                case OPERATOR_EQ:
+                case OPERATOR_NOT_EQ:
+                {
+                    ip = emit(comp, OPCODE_COMPARE_EQ, 0, NULL);
+                    if (ip < 0) {
+                        goto error;
+                    }
+                    break;
                 }
+                case OPERATOR_GT:
+                case OPERATOR_GTE:
+                case OPERATOR_LT:
+                case OPERATOR_LTE:
+                {
+                    ip = emit(comp, OPCODE_COMPARE, 0, NULL);
+                    if (ip < 0) {
+                        goto error;
+                    }
+                    break;
+                }
+                default: break;
             }
 
             ip = emit(comp, op, 0, NULL);
@@ -10069,21 +10086,6 @@ static const symbol_t* define_symbol(compiler_t *comp, src_pos_t pos, const char
 
     return symbol;
 }
-
-static bool is_comparison(operator_t op) {
-    switch (op) {
-        case OPERATOR_EQ:
-        case OPERATOR_NOT_EQ:
-        case OPERATOR_GT:
-        case OPERATOR_GTE:
-        case OPERATOR_LT:
-        case OPERATOR_LTE:
-            return true;
-        default:
-            return false;
-    }
-    return false;
-}
 //FILE_END
 //FILE_START:object.c
 #include <stdlib.h>
@@ -10670,11 +10672,13 @@ object_t object_copy(gcmem_t *mem, object_t obj) {
     return copy;
 }
 
-double object_compare(object_t a, object_t b) {
+double object_compare(object_t a, object_t b, bool *out_ok) {
     if (a.handle == b.handle) {
         return 0;
     }
-    
+
+    *out_ok = true;
+
     object_type_t a_type = object_get_type(a);
     object_type_t b_type = object_get_type(b);
 
@@ -10693,8 +10697,9 @@ double object_compare(object_t a, object_t b) {
         intptr_t b_data_val = (intptr_t)object_get_allocated_data(b);
         return (double)(a_data_val - b_data_val);
     } else {
-        return a.handle - b.handle;
+        *out_ok = false;
     }
+    return 1;
 }
 
 bool object_equals(object_t a, object_t b) {
@@ -10704,7 +10709,8 @@ bool object_equals(object_t a, object_t b) {
     if (a_type != b_type) {
         return false;
     }
-    double res = object_compare(a, b);
+    bool ok = false;
+    double res = object_compare(a, b, &ok);
     return APE_DBLEQ(res, 0);
 }
 
@@ -11567,6 +11573,7 @@ static bool can_data_be_put_in_pool(gcmem_t *mem, object_data_t *data) {
 //FILE_START:builtins.c
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
 
 #ifndef APE_AMALGAMATED
 #include "builtins.h"
@@ -11590,6 +11597,7 @@ static object_t print_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t read_file_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t write_file_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t to_str_fn(vm_t *vm, void *data, int argc, object_t *args);
+static object_t to_num_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t char_to_str_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t range_fn(vm_t *vm, void *data, int argc, object_t *args);
 static object_t keys_fn(vm_t *vm, void *data, int argc, object_t *args);
@@ -11653,6 +11661,7 @@ static struct {
     {"remove",      remove_fn},
     {"remove_at",   remove_at_fn},
     {"to_str",      to_str_fn},
+    {"to_num",      to_num_fn},
     {"range",       range_fn},
     {"keys",        keys_fn},
     {"values",      values_fn},
@@ -11980,6 +11989,42 @@ static object_t to_str_fn(vm_t *vm, void *data, int argc, object_t *args) {
     object_t res = object_make_string(vm->mem, strbuf_get_string(buf));
     strbuf_destroy(buf);
     return res;
+}
+
+static object_t to_num_fn(vm_t *vm, void *data, int argc, object_t *args) {
+    (void)data;
+    if (!CHECK_ARGS(vm, true, argc, args, OBJECT_STRING | OBJECT_NUMBER | OBJECT_BOOL | OBJECT_NULL)) {
+        return object_make_null();
+    }
+    double result = 0;
+    const char *string = "";
+    if (object_is_numeric(args[0])) {
+        result = object_get_number(args[0]);
+    } else if (object_is_null(args[0])) {
+        result = 0;
+    } else if (object_get_type(args[0]) == OBJECT_STRING) {
+        string = object_get_string(args[0]);
+        char *end;
+        errno = 0;
+        result = strtod(string, &end);
+        if (errno == ERANGE && (result <= -HUGE_VAL || result >= HUGE_VAL)) {
+            goto err;;
+        }
+        if (errno && errno != ERANGE) {
+            goto err;
+        }
+        size_t string_len = strlen(string);
+        size_t parsed_len = end - string;
+        if (string_len != parsed_len) {
+            goto err;
+        }
+    } else {
+        goto err;
+    }
+    return object_make_number(result);
+err:
+    errors_add_errorf(vm->errors, ERROR_RUNTIME, src_pos_invalid, "Cannot convert \"%s\" to number", string);
+    return object_make_null();
 }
 
 static object_t char_to_str_fn(vm_t *vm, void *data, int argc, object_t *args) {
@@ -12970,7 +13015,9 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 stack_push(vm, object_make_bool(false));
                 break;
             }
-            case OPCODE_COMPARE: {
+            case OPCODE_COMPARE:
+            case OPCODE_COMPARE_EQ:
+            {
                 object_t right = stack_pop(vm);
                 object_t left = stack_pop(vm);
                 bool is_overloaded = false;
@@ -12979,9 +13026,18 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     goto err;
                 }
                 if (!is_overloaded) {
-                    double comparison_res = object_compare(left, right);
-                    object_t res = object_make_number(comparison_res);
-                    stack_push(vm, res);
+                    double comparison_res = object_compare(left, right, &ok);
+                    if (ok || opcode == OPCODE_COMPARE_EQ) {
+                        object_t res = object_make_number(comparison_res);
+                        stack_push(vm, res);
+                    } else {
+                        const char *right_type_string = object_get_type_name(object_get_type(right));
+                        const char *left_type_string = object_get_type_name(object_get_type(left));
+                        errors_add_errorf(vm->errors, ERROR_RUNTIME, frame_src_position(vm->current_frame),
+                                          "Cannot compare %s and %s",
+                                          left_type_string, right_type_string);
+                        goto err;
+                    }
                 }
                 break;
             }
@@ -13801,7 +13857,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 
 #define APE_IMPL_VERSION_MAJOR 0
 #define APE_IMPL_VERSION_MINOR 13
-#define APE_IMPL_VERSION_PATCH 0
+#define APE_IMPL_VERSION_PATCH 1
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\

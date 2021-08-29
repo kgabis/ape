@@ -84,7 +84,6 @@ static void counted_free(void *ctx, void *ptr) {
     free(ptr);
 }
 
-
 static void print_ape_errors(ape_t *ape) {
     int count = ape_errors_count(ape);
     for (int i = 0; i < count; i++) {
