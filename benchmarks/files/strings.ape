@@ -1,0 +1,14 @@
+fn gen_string(n) {
+    var res = ""
+    for (var i = 0; i < n; i++) {
+        res += "a"
+    }
+    return res
+}
+
+var num_strings = 15000
+var str_len = 3049
+
+for (var i = 0; i < num_strings; i++) {
+    gen_string(str_len)
+}

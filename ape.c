@@ -949,7 +949,7 @@ typedef struct traceback traceback_t;
 typedef struct vm vm_t;
 typedef struct gcmem gcmem_t;
 
-#define OBJECT_STRING_BUF_SIZE 32
+#define OBJECT_STRING_BUF_SIZE 24
 
 typedef enum {
     OBJECT_NONE      = 0,
@@ -1021,6 +1021,8 @@ typedef struct object_string {
     };
     unsigned long hash;
     bool is_allocated;
+    int capacity;
+    int length;
 } object_string_t;
 
 typedef struct object_data {
@@ -1043,8 +1045,7 @@ APE_INTERNAL object_t object_make_number(double val);
 APE_INTERNAL object_t object_make_bool(bool val);
 APE_INTERNAL object_t object_make_null(void);
 APE_INTERNAL object_t object_make_string(gcmem_t *mem, const char *string);
-APE_INTERNAL object_t object_make_string_no_copy(gcmem_t *mem, char *string);
-APE_INTERNAL object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) __attribute__ ((format (printf, 2, 3)));
+APE_INTERNAL object_t object_make_string_with_capacity(gcmem_t *mem, int capacity);
 APE_INTERNAL object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn fn, void *data, int data_len);
 APE_INTERNAL object_t object_make_array(gcmem_t *mem);
 APE_INTERNAL object_t object_make_array_with_capacity(gcmem_t *mem, unsigned capacity);
@@ -1079,6 +1080,12 @@ APE_INTERNAL bool           object_get_bool(object_t obj);
 APE_INTERNAL double         object_get_number(object_t obj);
 APE_INTERNAL function_t*    object_get_function(object_t obj);
 APE_INTERNAL const char*    object_get_string(object_t obj);
+APE_INTERNAL int            object_get_string_length(object_t obj);
+APE_INTERNAL void           object_set_string_length(object_t obj, int len);
+APE_INTERNAL int            object_get_string_capacity(object_t obj);
+APE_INTERNAL char*          object_get_mutable_string(object_t obj);
+APE_INTERNAL bool           object_string_append(object_t obj, const char *src, int len);
+APE_INTERNAL unsigned long  object_get_string_hash(object_t obj);
 APE_INTERNAL native_function_t* object_get_native_function(object_t obj);
 APE_INTERNAL object_type_t  object_get_type(object_t obj);
 
@@ -1405,7 +1412,7 @@ typedef struct object_data object_data_t;
 typedef struct env env_t;
 
 #define GCMEM_POOL_SIZE 2048
-#define GCMEM_POOLS_NUM 2
+#define GCMEM_POOLS_NUM 3
 #define GCMEM_SWEEP_INTERVAL 128
 
 typedef struct object_data_pool {
@@ -1769,6 +1776,9 @@ static char* collections_strndup(allocator_t *alloc, const char *string, size_t 
 }
 
 static char* collections_strdup(allocator_t *alloc, const char *string) {
+    if (!string) {
+        return NULL;
+    }
     return collections_strndup(alloc, string, strlen(string));
 }
 
@@ -2842,7 +2852,7 @@ bool array_reverse(array_t_ *arr) {
         return true;
     }
     void *temp = allocator_malloc(arr->alloc, arr->element_size);
-    if (temp) {
+    if (!temp) {
         return false;
     }
     for (int a_ix = 0; a_ix < (count / 2); a_ix++) {
@@ -3247,6 +3257,7 @@ ptrarray(char)* kg_split_string(allocator_t *alloc, const char *str, const char 
         }
         bool ok = ptrarray_add(res, line);
         if (!ok) {
+            allocator_free(alloc, line);
             goto err;
         }
         line_start = line_end + 1;
@@ -7813,7 +7824,10 @@ void code_to_string(uint8_t *code, src_pos_t *source_positions, size_t code_size
         pos++;
 
         uint64_t operands[2];
-        code_read_operands(def, code + pos, operands);
+        bool ok = code_read_operands(def, code + pos, operands);
+        if (!ok) {
+            return;
+        }
         for (int i = 0; i < def->num_operands; i++) {
             if (op == OPCODE_NUMBER) {
                 double val_double = ape_uint64_to_double(operands[i]);
@@ -8104,6 +8118,7 @@ typedef struct compiler {
     ptrarray(file_scope_t) *file_scopes;
     array(src_pos_t) *src_positions_stack;
     dict(module_t) *modules;
+    dict(int) *string_constants_positions;
 } compiler_t;
 
 static bool compiler_init(compiler_t *comp,
@@ -8338,6 +8353,11 @@ static bool compiler_init(compiler_t *comp,
     if (!ok) {
         goto err;
     }
+    comp->string_constants_positions = dict_make(comp->alloc, NULL, NULL);
+    if (!comp->string_constants_positions) {
+        goto err;
+    }
+
     return true;
 err:
     compiler_deinit(comp);
@@ -8348,6 +8368,12 @@ static void compiler_deinit(compiler_t *comp) {
     if (!comp) {
         return;
     }
+    for (int i = 0; i < dict_count(comp->string_constants_positions); i++) {
+        int *val = dict_get_value_at(comp->string_constants_positions, i);
+        allocator_free(comp->alloc, val);
+    }
+    dict_destroy(comp->string_constants_positions);
+    
     while (ptrarray_count(comp->file_scopes) > 0) {
         pop_file_scope(comp);
     }
@@ -8393,6 +8419,21 @@ static bool compiler_init_shallow_copy(compiler_t *copy, compiler_t *src) {
     }
     array_destroy(copy->constants);
     copy->constants = constants_copy;
+
+    for (int i = 0; i < dict_count(src->string_constants_positions); i++) {
+        const char *key = dict_get_key_at(src->string_constants_positions, i);
+        int *val = dict_get_value_at(src->string_constants_positions, i);
+        int *val_copy = allocator_malloc(src->alloc, sizeof(int));
+        if (!val_copy) {
+            goto err;
+        }
+        *val_copy = *val;
+        ok = dict_set(copy->string_constants_positions, key, val_copy);
+        if (!ok) {
+            allocator_free(src->alloc, val_copy);
+            goto err;
+        }
+    }
 
     file_scope_t *src_file_scope = ptrarray_top(src->file_scopes);
     file_scope_t *copy_file_scope = ptrarray_top(copy->file_scopes);
@@ -9318,14 +9359,32 @@ static bool compile_expression(compiler_t *comp, expression_t *expr) {
             break;
         }
         case EXPRESSION_STRING_LITERAL: {
-            object_t obj = object_make_string(comp->mem, expr->string_literal);
-            if (object_is_null(obj)) {
-                goto error;
-            }
+            int pos = 0;
+            int *current_pos = dict_get(comp->string_constants_positions, expr->string_literal);
+            if (current_pos) {
+                pos = *current_pos;
+            } else {
+                object_t obj = object_make_string(comp->mem, expr->string_literal);
+                if (object_is_null(obj)) {
+                    goto error;
+                }
 
-            int pos = add_constant(comp, obj);
-            if (pos < 0) {
-                goto error;
+                pos = add_constant(comp, obj);
+                if (pos < 0) {
+                    goto error;
+                }
+
+                int *pos_val = allocator_malloc(comp->alloc, sizeof(int));
+                if (!pos_val) {
+                    goto error;
+                }
+
+                *pos_val = pos;
+                ok = dict_set(comp->string_constants_positions, expr->string_literal, pos_val);
+                if (!ok) {
+                    allocator_free(comp->alloc, pos_val);
+                    goto error;
+                }
             }
 
             ip = emit(comp, OPCODE_CONSTANT, 1, (uint64_t[]){pos});
@@ -10118,6 +10177,8 @@ static array(object_t)* object_get_allocated_array(object_t object);
 static bool object_is_number(object_t obj);
 static uint64_t get_type_tag(object_type_t type);
 static bool freevals_are_allocated(function_t *fun);
+static char *object_data_get_string(object_data_t *data);
+static bool object_data_string_reserve_capacity(object_data_t *data, int capacity);
 
 object_t object_make_from_data(object_type_t type, object_data_t *data) {
     object_t object;
@@ -10145,45 +10206,40 @@ object_t object_make_null() {
 }
 
 object_t object_make_string(gcmem_t *mem, const char *string) {
-    object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_STRING);
-    if (!obj) {
+    int len = (int)strlen(string);
+    object_t res = object_make_string_with_capacity(mem, len);
+    if (object_is_null(res)) {
+        return res;
+    }
+    bool ok = object_string_append(res, string, len);
+    if (!ok) {
         return object_make_null();
     }
-
-    int len = (int)strlen(string);
-    if ((len + 1) < OBJECT_STRING_BUF_SIZE) {
-        memcpy(obj->string.value_buf, string, len + 1);
-        obj->string.is_allocated = false;
-    } else {
-        obj->string.value_allocated = ape_strdup(mem->alloc, string);
-        if (!obj->string.value_allocated) {
-            return object_make_null();
-        }
-        obj->string.is_allocated = true;
-    }
-    obj->string.hash = object_hash_string(string);
-    return object_make_from_data(OBJECT_STRING, obj);
+    return res;
 }
 
-object_t object_make_string_no_copy(gcmem_t *mem, char *string) {
-    object_data_t *obj = gcmem_alloc_object_data(mem, OBJECT_STRING);
-    if (!obj) {
-        return object_make_null();
+object_t object_make_string_with_capacity(gcmem_t *mem, int capacity) {
+    object_data_t *data = gcmem_get_object_data_from_pool(mem, OBJECT_STRING);
+    if (!data) {
+        data = gcmem_alloc_object_data(mem, OBJECT_STRING);
+        if (!data) {
+            return object_make_null();
+        }
+        data->string.capacity = OBJECT_STRING_BUF_SIZE - 1;
+        data->string.is_allocated = false;
     }
 
-    int len = (int)strlen(string);
-    if ((len + 1) < OBJECT_STRING_BUF_SIZE) {
-        memcpy(obj->string.value_buf, string, len + 1);
-        obj->string.is_allocated = false;
-        obj->string.hash = object_hash_string(string);
-        allocator_free(mem->alloc, string);
-        string = NULL;
-    } else {
-        obj->string.value_allocated = string;
-        obj->string.is_allocated = true;
-        obj->string.hash = object_hash_string(string);
+    data->string.length = 0;
+    data->string.hash = 0;
+
+    if (capacity > data->string.capacity) {
+        bool ok = object_data_string_reserve_capacity(data, capacity);
+        if (!ok) {
+            return object_make_null();
+        }
     }
-    return object_make_from_data(OBJECT_STRING, obj);
+
+    return object_make_from_data(OBJECT_STRING, data);
 }
 
 object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) {
@@ -10192,20 +10248,17 @@ object_t object_make_stringf(gcmem_t *mem, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *res = (char*)allocator_malloc(mem->alloc, to_write + 1);
-    if (!res) {
+    object_t res = object_make_string_with_capacity(mem, to_write);
+    if (object_is_null(res)) {
         return object_make_null();
     }
-    int written = vsprintf(res, fmt, args);
+    char *res_buf = object_get_mutable_string(res);
+    int written = vsprintf(res_buf, fmt, args);
     (void)written;
     APE_ASSERT(written == to_write);
     va_end(args);
-    object_t res_obj = object_make_string_no_copy(mem, res);
-    if (object_is_null(res_obj)) {
-        allocator_free(mem->alloc, res);
-        return object_make_null();
-    }
-    return res_obj;
+    object_set_string_length(res, to_write);
+    return res;
 }
 
 object_t object_make_native_function(gcmem_t *mem, const char *name, native_fn fn, void *data, int data_len) {
@@ -10688,9 +10741,19 @@ double object_compare(object_t a, object_t b, bool *out_ok) {
         double right_val = object_get_number(b);
         return left_val - right_val;
     } else if (a_type == b_type && a_type == OBJECT_STRING) {
-        const char *left_string = object_get_string(a);
-        const char *right_string = object_get_string(b);
-        return strcmp(left_string, right_string);
+        int a_len = object_get_string_length(a);
+        int b_len = object_get_string_length(b);
+        if (a_len != b_len) {
+            return a_len - b_len;
+        }
+        unsigned long a_hash = object_get_string_hash(a);
+        unsigned long b_hash = object_get_string_hash(b);
+        if (a_hash != b_hash) {
+            return a_hash - b_hash;
+        }
+        const char *a_string = object_get_string(a);
+        const char *b_string = object_get_string(b);
+        return strcmp(a_string, b_string);
     } else if ((object_is_allocated(a) || object_is_null(a))
             && (object_is_allocated(b) || object_is_null(b))) {
         intptr_t a_data_val = (intptr_t)object_get_allocated_data(a);
@@ -10752,11 +10815,61 @@ double object_get_number(object_t obj) {
 const char * object_get_string(object_t object) {
     APE_ASSERT(object_get_type(object) == OBJECT_STRING);
     object_data_t *data = object_get_allocated_data(object);
-    if (data->string.is_allocated) {
-        return data->string.value_allocated;
-    } else {
-        return data->string.value_buf;
+    return object_data_get_string(data);
+}
+
+int object_get_string_length(object_t object) {
+    APE_ASSERT(object_get_type(object) == OBJECT_STRING);
+    object_data_t *data = object_get_allocated_data(object);
+    return data->string.length;
+}
+
+void object_set_string_length(object_t object, int len) {
+    APE_ASSERT(object_get_type(object) == OBJECT_STRING);
+    object_data_t *data = object_get_allocated_data(object);
+    data->string.length = len;
+}
+
+
+int object_get_string_capacity(object_t object) {
+    APE_ASSERT(object_get_type(object) == OBJECT_STRING);
+    object_data_t *data = object_get_allocated_data(object);
+    return data->string.capacity;
+}
+
+char* object_get_mutable_string(object_t object) {
+    APE_ASSERT(object_get_type(object) == OBJECT_STRING);
+    object_data_t *data = object_get_allocated_data(object);
+    return object_data_get_string(data);
+}
+
+bool object_string_append(object_t obj, const char *src, int len) {
+    APE_ASSERT(object_get_type(obj) == OBJECT_STRING);
+    object_data_t *data = object_get_allocated_data(obj);
+    object_string_t *string = &data->string;
+    char *str_buf = object_get_mutable_string(obj);
+    int current_len = string->length;
+    int capacity = string->capacity;
+    if ((len + current_len) > capacity) {
+        APE_ASSERT(false);
+        return false;
     }
+    memcpy(str_buf + current_len, src, len);
+    string->length += len;
+    str_buf[string->length] = '\0';
+    return true;
+}
+
+unsigned long object_get_string_hash(object_t obj) {
+    APE_ASSERT(object_get_type(obj) == OBJECT_STRING);
+    object_data_t *data = object_get_allocated_data(obj);
+    if (data->string.hash == 0) {
+        data->string.hash = object_hash_string(object_get_string(obj));
+        if (data->string.hash == 0) {
+            data->string.hash = 1;
+        }
+    }
+    return data->string.hash;
 }
 
 function_t* object_get_function(object_t object) {
@@ -11209,8 +11322,7 @@ static unsigned long object_hash(object_t *obj_ptr) {
             return val;
         }
         case OBJECT_STRING: {
-            object_data_t *data = object_get_allocated_data(obj);
-            return data->string.hash;
+            return object_get_string_hash(obj);
         }
         default: {
             return 0;
@@ -11256,6 +11368,52 @@ static uint64_t get_type_tag(object_type_t type) {
 
 static bool freevals_are_allocated(function_t *fun) {
     return fun->free_vals_count >= APE_ARRAY_LEN(fun->free_vals_buf);
+}
+
+static char *object_data_get_string(object_data_t *data) {
+    APE_ASSERT(data->type == OBJECT_STRING);
+    if (data->string.is_allocated) {
+        return data->string.value_allocated;
+    } else {
+        return data->string.value_buf;
+    }
+}
+
+static bool object_data_string_reserve_capacity(object_data_t *data, int capacity) {
+    APE_ASSERT(capacity >= 0);
+    
+    object_string_t *string = &data->string;
+
+    string->length = 0;
+    string->hash = 0;
+
+    if (capacity <= string->capacity) {
+        return true;
+    }
+
+    if (capacity <= (OBJECT_STRING_BUF_SIZE - 1)) {
+        if (string->is_allocated) {
+            APE_ASSERT(false); // should never happen
+            allocator_free(data->mem->alloc, string->value_allocated); // just in case
+        }
+        string->capacity = OBJECT_STRING_BUF_SIZE - 1;
+        string->is_allocated = false;
+        return true;
+    }
+
+    char *new_value = allocator_malloc(data->mem->alloc, capacity + 1);
+    if (!new_value) {
+        return false;
+    }
+
+    if (string->is_allocated) {
+        allocator_free(data->mem->alloc, string->value_allocated);
+    }
+
+    string->value_allocated = new_value;
+    string->is_allocated = true;
+    string->capacity = capacity;
+    return true;
 }
 //FILE_END
 //FILE_START:gc.c
@@ -11391,6 +11549,7 @@ object_data_t* gcmem_get_object_data_from_pool(gcmem_t *mem, object_type_t type)
     }
 
     pool->count--;
+
     return data;
 }
 
@@ -11528,16 +11687,17 @@ void gc_enable_on_object(object_t obj) {
     array_remove_item(data->mem->objects_not_gced, &obj);
 }
 
-APE_INTERNAL int gc_should_sweep(gcmem_t *mem) {
+int gc_should_sweep(gcmem_t *mem) {
     return mem->allocations_since_sweep > GCMEM_SWEEP_INTERVAL;
 }
 
 // INTERNAL
 static object_data_pool_t* get_pool_for_type(gcmem_t *mem, object_type_t type) {
     switch (type) {
-        case OBJECT_ARRAY: return &mem->pools[0];
-        case OBJECT_MAP:   return &mem->pools[1];
-        default:           return NULL;
+        case OBJECT_ARRAY:  return &mem->pools[0];
+        case OBJECT_MAP:    return &mem->pools[1];
+        case OBJECT_STRING: return &mem->pools[2];
+        default:            return NULL;
     }
 }
 
@@ -11554,6 +11714,12 @@ static bool can_data_be_put_in_pool(gcmem_t *mem, object_data_t *data) {
         }
         case OBJECT_MAP: {
             if (object_get_map_length(obj) > 1024) {
+                return false;
+            }
+            break;
+        }
+        case OBJECT_STRING: {
+            if (!data->string.is_allocated || data->string.capacity > 4096) {
                 return false;
             }
             break;
@@ -11724,8 +11890,7 @@ static object_t len_fn(vm_t *vm, void *data, int argc, object_t *args) {
     object_t arg = args[0];
     object_type_t type = object_get_type(arg);
     if (type == OBJECT_STRING) {
-        const char *str = object_get_string(arg);
-        int len = (int)strlen(str);
+        int len = object_get_string_length(arg);
         return object_make_number(len);
     } else if (type == OBJECT_ARRAY) {
         int len = object_get_array_length(arg);
@@ -11804,20 +11969,19 @@ static object_t reverse_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return res;
     } else if (type == OBJECT_STRING) {
         const char *str = object_get_string(arg);
-        int len = (int)strlen(str);
-        char *res_buf = allocator_malloc(vm->alloc, len + 1);
-        if (!res_buf) {
+        int len = object_get_string_length(arg);
+
+        object_t res = object_make_string_with_capacity(vm->mem, len);
+        if (object_is_null(res)) {
             return object_make_null();
         }
+        char *res_buf = object_get_mutable_string(res);
         for (int i = 0; i < len; i++) {
             res_buf[len - i - 1] = str[i];
         }
         res_buf[len] = '\0';
-        object_t res = object_make_string_no_copy(vm->mem, res_buf);
-        if (object_is_null(res)) {
-            allocator_free(vm->alloc, res_buf);
-            return object_make_null();
-        }
+        object_set_string_length(res, len);
+        return res;
     }
     return object_make_null();
 }
@@ -11941,9 +12105,9 @@ static object_t write_file_fn(vm_t *vm, void *data, int argc, object_t *args) {
 
     const char *path = object_get_string(args[0]);
     const char *string = object_get_string(args[1]);
-    int string_size = (int)strlen(string) + 1;
+    int string_len = object_get_string_length(args[1]);
 
-    int written = (int)config->fileio.write_file.write_file(config->fileio.write_file.context, path, string, string_size);
+    int written = (int)config->fileio.write_file.write_file(config->fileio.write_file.context, path, string, string_len);
     
     return object_make_number(written);
 }
@@ -12013,8 +12177,8 @@ static object_t to_num_fn(vm_t *vm, void *data, int argc, object_t *args) {
         if (errno && errno != ERANGE) {
             goto err;
         }
-        size_t string_len = strlen(string);
-        size_t parsed_len = end - string;
+        int string_len = object_get_string_length(args[0]);
+        int parsed_len = (int)(end - string);
         if (string_len != parsed_len) {
             goto err;
         }
@@ -12176,26 +12340,28 @@ static object_t concat_fn(vm_t *vm, void *data, int argc, object_t *args) {
         if (!CHECK_ARGS(vm, true, argc, args, OBJECT_STRING, OBJECT_STRING)) {
             return object_make_null();
         }
-        const char *str = object_get_string(args[0]);
-        int len = (int)strlen(str);
-        const char *arg_str = object_get_string(args[1]);
-        int arg_str_len = (int)strlen(arg_str);
-        char *res_buf = allocator_malloc(vm->alloc, len + arg_str_len + 1);
-        if (!res_buf) {
+        const char* left_val = object_get_string(args[0]);
+        int left_len = (int)object_get_string_length(args[0]);
+
+        const char* right_val = object_get_string(args[1]);
+        int right_len = (int)object_get_string_length(args[1]);
+
+        object_t res = object_make_string_with_capacity(vm->mem, left_len + right_len);
+        if (object_is_null(res)) {
             return object_make_null();
         }
-        for (int i = 0; i < len; i++) {
-            res_buf[i] = str[i];
+
+        bool ok = object_string_append(res, left_val, left_len);
+        if (!ok) {
+            return object_make_null();
         }
-        for (int i = 0; i < arg_str_len; i++) {
-            res_buf[len + i] = arg_str[i];
+
+        ok = object_string_append(res, right_val, right_len);
+        if (!ok) {
+            return object_make_null();
         }
-        res_buf[len + arg_str_len] = '\0';
-        object_t res = object_make_string_no_copy(vm->mem, res_buf);
-        if (object_is_null(res)) {
-            allocator_free(vm->alloc, res_buf);
-            return  object_make_null();
-        }
+
+        return res;
     }
     return object_make_null();
 }
@@ -12341,7 +12507,7 @@ static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args) {
         return res;
     } else if (arg_type == OBJECT_STRING) {
         const char *str = object_get_string(args[0]);
-        int len = (int)strlen(str);
+        int len = (int)object_get_string_length(args[0]);
         if (index < 0) {
             index = len + index;
             if (index < 0) {
@@ -12351,20 +12517,19 @@ static object_t slice_fn(vm_t *vm, void *data, int argc, object_t *args) {
         if (index >= len) {
             return object_make_string(vm->mem, "");
         }
-        char *res_str = allocator_malloc(vm->alloc, len - index + 1);
-        if (!res_str) {
+        int res_len = len - index;
+        object_t res = object_make_string_with_capacity(vm->mem, res_len);
+        if (object_is_null(res)) {
             return object_make_null();
         }
-        memset(res_str, 0, len - index + 1);
+
+        char *res_buf = object_get_mutable_string(res);
+        memset(res_buf, 0, res_len + 1);
         for (int i = index; i < len; i++) {
             char c = str[i];
-            res_str[i - index] = c;
+            res_buf[i - index] = c;
         }
-        object_t res = object_make_string_no_copy(vm->mem, res_str);
-        if (object_is_null(res)) {
-            allocator_free(vm->alloc, res_str);
-            return object_make_null();
-        }
+        object_set_string_length(res, res_len);
         return res;
     } else {
         const char *type_str = object_get_type_name(arg_type);
@@ -12978,13 +13143,33 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     }
                     stack_push(vm, object_make_number(res));
                 } else if (left_type == OBJECT_STRING  && right_type == OBJECT_STRING && opcode == OPCODE_ADD) {
-                    const char* right_val = object_get_string(right);
-                    const char* left_val = object_get_string(left);
-                    object_t res_obj = object_make_stringf(vm->mem, "%s%s", left_val, right_val);
-                    if (object_is_null(res_obj)) {
-                        goto err;
+                    int left_len = (int)object_get_string_length(left);
+                    int right_len = (int)object_get_string_length(right);
+
+                    if (left_len == 0) {
+                        stack_push(vm, right);
+                    } else if (right_len == 0) {
+                        stack_push(vm, left);
+                    } else {
+                        const char* left_val = object_get_string(left);
+                        const char* right_val = object_get_string(right);
+
+                        object_t res = object_make_string_with_capacity(vm->mem, left_len + right_len);
+                        if (object_is_null(res)) {
+                            goto err;
+                        }
+
+                        ok = object_string_append(res, left_val, left_len);
+                        if (!ok) {
+                            goto err;
+                        }
+
+                        ok = object_string_append(res, right_val, right_len);
+                        if (!ok) {
+                            goto err;
+                        }
+                        stack_push(vm, res);
                     }
-                    stack_push(vm, res_obj);
                 } else {
                     bool overload_found = false;
                     bool ok = try_overload_operator(vm, left, right, opcode, &overload_found);
@@ -13245,8 +13430,9 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     res = object_get_map_value(left, index);
                 } else if (left_type == OBJECT_STRING) {
                     const char *str = object_get_string(left);
+                    int left_len = object_get_string_length(left);
                     int ix = (int)object_get_number(index);
-                    if (ix >= 0 && ix < (int)strlen(str)) {
+                    if (ix >= 0 && ix < left_len) {
                         char res_str[2] = {str[ix], '\0'};
                         res = object_make_string(vm->mem, res_str);
                     }
@@ -13282,8 +13468,9 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                     res = object_get_kv_pair_at(vm->mem, left, ix);
                 } else if (left_type == OBJECT_STRING) {
                     const char *str = object_get_string(left);
+                    int left_len = object_get_string_length(left);
                     int ix = (int)object_get_number(index);
-                    if (ix >= 0 && ix < (int)strlen(str)) {
+                    if (ix >= 0 && ix < left_len) {
                         char res_str[2] = {str[ix], '\0'};
                         res = object_make_string(vm->mem, res_str);
                     }
@@ -13451,8 +13638,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
                 } else if (type == OBJECT_MAP) {
                     len = object_get_map_length(val);
                 } else if (type == OBJECT_STRING) {
-                    const char *str = object_get_string(val);
-                    len = (int)strlen(str);
+                    len = object_get_string_length(val);
                 } else {
                     const char *type_name = object_get_type_name(type);
                     errors_add_errorf(vm->errors, ERROR_RUNTIME, frame_src_position(vm->current_frame), "Cannot get length of %s", type_name);
@@ -13856,8 +14042,8 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 13
-#define APE_IMPL_VERSION_PATCH 1
+#define APE_IMPL_VERSION_MINOR 14
+#define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
  || (APE_VERSION_MINOR != APE_IMPL_VERSION_MINOR)\
@@ -14274,15 +14460,17 @@ ape_object_t ape_object_make_stringf(ape_t *ape, const char *fmt, ...) {
     int to_write = vsnprintf(NULL, 0, fmt, args);
     va_end(args);
     va_start(args, fmt);
-    char *res = (char*)allocator_malloc(&ape->alloc, to_write + 1);
-    if (!res) {
+    object_t res = object_make_string_with_capacity(ape->mem, to_write);
+    if (object_is_null(res)) {
         return ape_object_make_null();
     }
-    int written = vsprintf(res, fmt, args);
+    char *res_buf = object_get_mutable_string(res);
+    int written = vsprintf(res_buf, fmt, args);
     (void)written;
     APE_ASSERT(written == to_write);
     va_end(args);
-    return object_to_ape_object(object_make_string_no_copy(ape->mem, res));
+    object_set_string_length(res, to_write);
+    return object_to_ape_object(res);
 }
 
 ape_object_t ape_object_make_null() {

@@ -86,14 +86,17 @@ for (name in popular_names) {
     }
 }
 
-test_check_args(1, [1, 2, 3], {"a": 1}, "lorem", true, fn() {}, println)
+{
+    test_check_args(1, [1, 2, 3], {"a": 1}, "lorem", true, fn() {}, println)
+    if (true) {}
+    if (false) {}
+    var i = 0
+    var j = 0
+    while ((i+=1) < 10) { break; }
+    while ((j+=1) < 10) { }
+}
+
 const val = 123
-if (true) {}
-if (false) {}
-var i = 0
-var j = 0
-while ((i+=1) < 10) { break; }
-while ((j+=1) < 10) { }
 
 assert("abc"[0] == "a")
 assert("abc"[0] != "b")
@@ -316,3 +319,26 @@ assert(get_test_arr()[--fun_i]() == 0)
 assert(1 == 1)
 assert(1 != "1")
 assert(1 != {})
+assert("a" + "b" == "ab")
+
+{
+    var n = 256
+    var str = ""
+    for (var i = 0; i < n; i++) {
+        str += "x"
+    }
+    assert(len(str) == n)
+    for (var i = 0; i < n; i++) {
+        assert(str[i] == "x")
+    }
+}
+
+assert(reverse("abc") == "cba")
+assert(reverse("abcd") == "dcba")
+
+assert(slice("abc", 1) == "bc")
+assert(slice("abc", -1) == "c")
+
+assert(concat("abc", "def") == "abcdef")
+
+assert(test_str == "lorem ipsum")

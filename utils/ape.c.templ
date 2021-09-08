@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT
 
 ape
 https://github.com/kgabis/ape
-Copyright (c) 2020 Krzysztof Gabis
+Copyright (c) 2021 Krzysztof Gabis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -39,17 +39,19 @@ THE SOFTWARE.
 //-----------------------------------------------------------------------------
 {{FILE:common.h}}
 {{FILE:collections.h}}
-{{FILE:error.h}}
+{{FILE:errors.h}}
 {{FILE:token.h}}
+{{FILE:compiled_file.h}}
 {{FILE:lexer.h}}
 {{FILE:ast.h}}
 {{FILE:parser.h}}
+{{FILE:object.h}}
+{{FILE:global_store.h}}
 {{FILE:symbol_table.h}}
 {{FILE:code.h}}
 {{FILE:compilation_scope.h}}
 {{FILE:optimisation.h}}
 {{FILE:compiler.h}}
-{{FILE:object.h}}
 {{FILE:gc.h}}
 {{FILE:builtins.h}}
 {{FILE:traceback.h}}
@@ -61,11 +63,13 @@ THE SOFTWARE.
 //-----------------------------------------------------------------------------
 {{FILE:common.c}}
 {{FILE:collections.c}}
-{{FILE:error.c}}
+{{FILE:errors.c}}
 {{FILE:token.c}}
+{{FILE:compiled_file.c}}
 {{FILE:lexer.c}}
 {{FILE:ast.c}}
 {{FILE:parser.c}}
+{{FILE:global_store.c}}
 {{FILE:symbol_table.c}}
 {{FILE:code.c}}
 {{FILE:compilation_scope.c}}

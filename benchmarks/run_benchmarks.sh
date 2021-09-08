@@ -16,6 +16,7 @@ gcc -O3 -DAPE_BENCHMARKS_MAIN *.c -o benchmarks -lm
 echo "    OK"
 
 echo "Running benchmarks"
+./benchmarks strings.ape
 ./benchmarks mergesort.ape
 ./benchmarks raytracer_profile.ape
 ./benchmarks raytracer_profile_optimised.ape

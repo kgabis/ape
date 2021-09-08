@@ -112,6 +112,7 @@ static void test_program() {
 
     ape_set_native_function(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
     ape_set_global_constant(ape, "test", ape_object_make_number(42));
+    ape_set_global_constant(ape, "test_str", ape_object_make_stringf(ape, "%s %s", "lorem", "ipsum"));
     ape_set_native_function(ape, "square_array", square_array_fun, NULL);
     ape_set_native_function(ape, "make_test_dict", make_test_dict_fun, NULL);
     ape_set_native_function(ape, "test_check_args", test_check_args_fun, NULL);
@@ -143,6 +144,7 @@ static void test_compiling() {
 
     ape_set_native_function(ape, "external_fn_test", external_fn_test, &g_external_fn_test);
     ape_set_global_constant(ape, "test", ape_object_make_number(42));
+    ape_set_global_constant(ape, "test_str", ape_object_make_stringf(ape, "%s %s", "lorem", "ipsum"));
     ape_set_native_function(ape, "square_array", square_array_fun, NULL);
     ape_set_native_function(ape, "make_test_dict", make_test_dict_fun, NULL);
     ape_set_native_function(ape, "test_check_args", test_check_args_fun, NULL);
@@ -157,7 +159,7 @@ static void test_compiling() {
 
     for (int i = 0; i < 1000; i++) {
         ape_execute_program(ape, program);
-         if (ape_has_errors(ape)) {
+        if (ape_has_errors(ape)) {
             print_ape_errors(ape);
             assert(false);
         }

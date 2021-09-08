@@ -24,7 +24,7 @@ void repl_start() {
     ape_t *ape = ape_make();
 
     ape_set_repl_mode(ape, true);
-    ape_set_timeout(ape, 1.0);
+    ape_set_timeout(ape, 100.0);
 
     ape_set_native_function(ape, "exit", exit_repl, &exit);
 
