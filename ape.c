@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT
 
 ape
 https://github.com/kgabis/ape
-Copyright (c) 2021 Krzysztof Gabis
+Copyright (c) 2023 Krzysztof Gabis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -402,7 +402,7 @@ typedef enum error_type {
     ERROR_PARSING,
     ERROR_COMPILATION,
     ERROR_RUNTIME,
-    ERROR_TIMEOUT,
+    ERROR_TIME_OUT, // not ERROR_TIMEOUT to avoid name collision from windows.h
     ERROR_ALLOCATION,
     ERROR_USER,
 } error_type_t;
@@ -1639,11 +1639,11 @@ char *ape_stringf(allocator_t *alloc, const char *format, ...) {
 
 void ape_log(const char *file, int line, const char *format, ...) {
     char msg[4096];
-    int written = snprintf(msg, APE_ARRAY_LEN(msg), "%s:%d: ", file, line);
+    int written = snprintf(msg, APE_ARRAY_LEN(msg) - 1, "%s:%d: ", file, line);
     (void)written;
     va_list args;
     va_start(args, format);
-    int written_msg = vsnprintf(msg + written, APE_ARRAY_LEN(msg) - written, format, args);
+    int written_msg = vsnprintf(msg + written, APE_ARRAY_LEN(msg) - written - 1, format, args);
     (void)written_msg;
     va_end(args);
 
@@ -1989,7 +1989,7 @@ bool dict_remove(dict_t_ *dict, const char *key) {
         if (dict->cells[j] == DICT_INVALID_IX) {
             break;
         }
-        unsigned int k = dict->hashes[dict->cells[j]] & (dict->cell_capacity - 1);
+        unsigned int k = (unsigned int)(dict->hashes[dict->cells[j]]) & (dict->cell_capacity - 1);
         if ((j > i && (k <= i || k > j))
             || (j < i && (k <= i && k > j))) {
             dict->cell_ixs[dict->cells[j]] = i;
@@ -2070,7 +2070,7 @@ static unsigned int dict_get_cell_ix(const dict_t_ *dict,
                                      bool *out_found)
 {
     *out_found = false;
-    unsigned int cell_ix = hash & (dict->cell_capacity - 1);
+    unsigned int cell_ix = (unsigned int)hash & (dict->cell_capacity - 1);
     for (unsigned int i = 0; i < dict->cell_capacity; i++) {
         unsigned int ix = (cell_ix + i) & (dict->cell_capacity - 1);
         unsigned int cell = dict->cells[ix];
@@ -2322,7 +2322,7 @@ bool valdict_remove(valdict_t_ *dict, void *key) {
         if (dict->cells[j] == VALDICT_INVALID_IX) {
             break;
         }
-        unsigned int k = dict->hashes[dict->cells[j]] & (dict->cell_capacity - 1);
+        unsigned int k = (unsigned int)(dict->hashes[dict->cells[j]]) & (dict->cell_capacity - 1);
         if ((j > i && (k <= i || k > j))
             || (j < i && (k <= i && k > j))) {
             dict->cell_ixs[dict->cells[j]] = i;
@@ -2410,7 +2410,7 @@ static unsigned int valdict_get_cell_ix(const valdict_t_ *dict,
                                         bool *out_found)
 {
     *out_found = false;
-    unsigned int cell_ix = hash & (dict->cell_capacity - 1);
+    unsigned int cell_ix = (unsigned int)hash & (dict->cell_capacity - 1);
     for (unsigned int i = 0; i < dict->cell_capacity; i++) {
         unsigned int ix = (cell_ix + i) & (dict->cell_capacity - 1);
         unsigned int cell = dict->cells[ix];
@@ -3432,7 +3432,7 @@ const char *error_type_to_string(error_type_t type) {
         case ERROR_PARSING:     return "PARSING";
         case ERROR_COMPILATION: return "COMPILATION";
         case ERROR_RUNTIME:     return "RUNTIME";
-        case ERROR_TIMEOUT:     return "TIMEOUT";
+        case ERROR_TIME_OUT:    return "TIMEOUT";
         case ERROR_ALLOCATION:  return "ALLOCATION";
         case ERROR_USER:        return "USER";
         default:                return "INVALID";
@@ -7854,17 +7854,17 @@ bool code_read_operands(opcode_definition_t *def, uint8_t *instr, uint64_t out_o
             }
             case 2: {
                 uint64_t operand = 0;
-                operand = operand | (instr[offset] << 8);
-                operand = operand | (instr[offset + 1]);
+                operand = operand | ((uint64_t)instr[offset] << 8);
+                operand = operand | ((uint64_t)instr[offset + 1]);
                 out_operands[i] = operand;
                 break;
             }
             case 4: {
                 uint64_t operand = 0;
-                operand = operand | (instr[offset + 0] << 24);
-                operand = operand | (instr[offset + 1] << 16);
-                operand = operand | (instr[offset + 2] << 8);
-                operand = operand | (instr[offset + 3]);
+                operand = operand | ((uint64_t)instr[offset + 0] << 24);
+                operand = operand | ((uint64_t)instr[offset + 1] << 16);
+                operand = operand | ((uint64_t)instr[offset + 2] << 8);
+                operand = operand | ((uint64_t)instr[offset + 3]);
                 out_operands[i] = operand;
                 break;
             }
@@ -13671,7 +13671,7 @@ bool vm_execute_function(vm_t *vm, object_t function, array(object_t) *constants
             if (time_check_counter > time_check_interval) {
                 int elapsed_ms = (int)ape_timer_get_elapsed_ms(&timer);
                 if (elapsed_ms > max_exec_time_ms) {
-                    errors_add_errorf(vm->errors, ERROR_TIMEOUT, frame_src_position(vm->current_frame), "Execution took more than %1.17g ms", max_exec_time_ms);
+                    errors_add_errorf(vm->errors, ERROR_TIME_OUT, frame_src_position(vm->current_frame), "Execution took more than %1.17g ms", max_exec_time_ms);
                     goto err;
                 }
                 time_check_counter = 0;
@@ -14042,7 +14042,7 @@ static bool try_overload_operator(vm_t *vm, object_t left, object_t right, opcod
 #include <stdio.h>
 
 #define APE_IMPL_VERSION_MAJOR 0
-#define APE_IMPL_VERSION_MINOR 14
+#define APE_IMPL_VERSION_MINOR 15
 #define APE_IMPL_VERSION_PATCH 0
 
 #if (APE_VERSION_MAJOR != APE_IMPL_VERSION_MAJOR)\
@@ -14892,7 +14892,7 @@ ape_error_type_t ape_error_get_type(const ape_error_t *ape_error) {
         case ERROR_PARSING:     return APE_ERROR_PARSING;
         case ERROR_COMPILATION: return APE_ERROR_COMPILATION;
         case ERROR_RUNTIME:     return APE_ERROR_RUNTIME;
-        case ERROR_TIMEOUT:     return APE_ERROR_TIMEOUT;
+        case ERROR_TIME_OUT:    return APE_ERROR_TIMEOUT;
         case ERROR_ALLOCATION:  return APE_ERROR_ALLOCATION;
         case ERROR_USER:        return APE_ERROR_USER;
         default:                return APE_ERROR_NONE;

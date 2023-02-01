@@ -3,7 +3,7 @@ SPDX-License-Identifier: MIT
 
 ape
 https://github.com/kgabis/ape
-Copyright (c) 2021 Krzysztof Gabis
+Copyright (c) 2023 Krzysztof Gabis
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -44,10 +44,10 @@ extern "C"
 #endif
 
 #define APE_VERSION_MAJOR 0
-#define APE_VERSION_MINOR 14
+#define APE_VERSION_MINOR 15
 #define APE_VERSION_PATCH 0
 
-#define APE_VERSION_STRING "0.14.0"
+#define APE_VERSION_STRING "0.15.0"
 
 typedef struct ape ape_t;
 typedef struct ape_object { uint64_t _internal; } ape_object_t;

@@ -204,13 +204,13 @@ fn vec2(x, y) {
 ape.c can be split into separate files by running utils/split.py:
 
 ```
-utils/split.py --input ape.c --output-path ape
+python3 utils/split.py --input ape.c --output-path ape
 ```
 
 It can be joined back into a single file with utils/join.py:
 
 ```
-utils/join.py --template utils/ape.c.templ --path ape --output ape.c
+python3 utils/join.py --template utils/ape.c.templ --path ape --output ape.c
 ```
 
 ## Visual Studio Code extension

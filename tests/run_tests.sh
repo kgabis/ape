@@ -6,7 +6,7 @@ dir=`mktemp -d /tmp/ape.XXXXXXX`
 echo "Temp dir: ${dir}"
 
 echo "Splitting and copying files"
-../utils/split.py --input ../ape.c --output-path ${dir}
+python3 ../utils/split.py --input ../ape.c --output-path ${dir}
 cp ../ape.h ${dir}
 
 cp -r *.c *h files/* ${dir}
